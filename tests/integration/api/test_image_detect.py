@@ -4,7 +4,6 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import create_app
-from app.repositories.kvrocks.auth_nonce_repository import InMemoryAuthNonceRepository
 from app.repositories.kvrocks.queue_repository import InMemoryVideoQueueRepository
 from tests.conftest import signed_headers
 
@@ -21,7 +20,6 @@ class FakeImageService:
 async def test_image_base64_endpoint_uses_stateless_service(test_settings) -> None:  # type: ignore[no-untyped-def]
     app = create_app(
         settings=test_settings,
-        nonce_repository=InMemoryAuthNonceRepository(),
         queue_repository=InMemoryVideoQueueRepository(),
     )
     app.state.image_detection_service = FakeImageService()

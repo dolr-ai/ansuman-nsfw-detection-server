@@ -1,0 +1,65 @@
+services:
+  app:
+    image: ${APP_IMAGE:-ghcr.io/ansuman-yral/ansuman-nsfw-detetction-server}:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    logging:
+      driver: journald
+      options:
+        tag: nsfw-app
+    environment:
+      PYTHONUNBUFFERED: "1"
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+
+      INTERNAL_REQUEST_HMAC_SECRET: ${INTERNAL_REQUEST_HMAC_SECRET}
+      INTERNAL_REQUEST_MAX_SKEW_SEC: ${INTERNAL_REQUEST_MAX_SKEW_SEC:-300}
+
+      POSTGRES_DATABASE_URL: ${POSTGRES_DATABASE_URL}
+
+      KVROCKS_HOST: ${KVROCKS_HOST}
+      KVROCKS_PORT: ${KVROCKS_PORT:-6379}
+      KVROCKS_PASSWORD: ${KVROCKS_PASSWORD}
+      KVROCKS_TLS_ENABLED: ${KVROCKS_TLS_ENABLED:-true}
+      KVROCKS_CLUSTER_ENABLED: ${KVROCKS_CLUSTER_ENABLED:-true}
+      KVROCKS_SSL_CA_CERT: ${KVROCKS_SSL_CA_CERT:-}
+      KVROCKS_SSL_CLIENT_CERT: ${KVROCKS_SSL_CLIENT_CERT:-}
+      KVROCKS_SSL_CLIENT_KEY: ${KVROCKS_SSL_CLIENT_KEY:-}
+
+      CLICKHOUSE_PRIMARY_DATABASE_URL: ${CLICKHOUSE_PRIMARY_DATABASE_URL}
+      CLICKHOUSE_SECONDARY_DATABASE_URL: ${CLICKHOUSE_SECONDARY_DATABASE_URL:-}
+      CLICKHOUSE_SECURE: ${CLICKHOUSE_SECURE:-true}
+      CLICKHOUSE_VERIFY: ${CLICKHOUSE_VERIFY:-false}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE:-yral}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_NSFW_TABLE: ${CLICKHOUSE_NSFW_TABLE:-video_nsfw_detection}
+      CLICKHOUSE_NSFW_AGG_TABLE: ${CLICKHOUSE_NSFW_AGG_TABLE:-video_nsfw_agg}
+
+      STORJ_INTERFACE_URL: ${STORJ_INTERFACE_URL}
+      STORJ_INTERFACE_TOKEN: ${STORJ_INTERFACE_TOKEN}
+
+      API_BASE_URL: ${API_BASE_URL:-https://api.openai.com/v1}
+      API_KEY: ${API_KEY}
+      MODEL_NAME: ${MODEL_NAME}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-openai-compatible}
+      MODEL_VERSION: ${MODEL_VERSION:-}
+
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_SEND_DEFAULT_PII: ${SENTRY_SEND_DEFAULT_PII:-false}
+    ports:
+      - "127.0.0.1:${HOST_APP_PORT:-8001}:8080"
+    expose:
+      - "8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      - nsfw-net
+
+networks:
+  nsfw-net:
+    driver: bridge

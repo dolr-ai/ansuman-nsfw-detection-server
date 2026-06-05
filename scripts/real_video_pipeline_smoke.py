@@ -15,9 +15,8 @@ from pydantic import SecretStr
 
 from app.config.settings import Settings
 from app.core.lifecycle import build_gpu_moderation_service
-from app.core.security import canonical_request, sign_canonical_request
+from app.core.security import sign_request
 from app.main import create_app
-from app.repositories.kvrocks.auth_nonce_repository import InMemoryAuthNonceRepository
 from app.repositories.kvrocks.queue_repository import InMemoryVideoQueueRepository
 from app.services.aggregation_service import AggregationService
 from app.services.frame_extraction_service import FrameExtractionService, download_video, frame_batches
@@ -50,20 +49,16 @@ def parse_storj_urls(path: Path) -> list[str]:
 
 def signed_headers(*, secret: str, method: str, path: str, raw_body: bytes) -> dict[str, str]:
     timestamp = str(int(time.time()))
-    nonce = str(uuid4())
-    canonical = canonical_request(
-        method=method,
-        path=path,
-        timestamp=timestamp,
-        nonce=nonce,
-        raw_body=raw_body,
-    )
     return {
         "content-type": "application/json",
-        "x-yral-service": "off-chain-agent",
-        "x-yral-timestamp": timestamp,
-        "x-yral-nonce": nonce,
-        "x-yral-signature": sign_canonical_request(secret, canonical),
+        "x-internal-timestamp": timestamp,
+        "x-internal-signature": sign_request(
+            secret,
+            timestamp=timestamp,
+            method=method,
+            path=path,
+            body=raw_body,
+        ),
     }
 
 
@@ -186,13 +181,12 @@ async def main() -> None:
     secret = "real-smoke-secret"
     temp_root = Path(tempfile.mkdtemp(prefix="nsfw-real-smoke-"))
     settings = Settings(
-        service_hmac_secrets={"off-chain-agent": SecretStr(secret)},
+        internal_request_hmac_secret=SecretStr(secret),
         video_temp_root=str(temp_root),
     )
     queue = InMemoryVideoQueueRepository()
     app = create_app(
         settings=settings,
-        nonce_repository=InMemoryAuthNonceRepository(),
         queue_repository=queue,
     )
 

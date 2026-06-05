@@ -14,7 +14,10 @@ TextServiceDep = Annotated[TextDetectionService, Depends(get_text_detection_serv
     "/detect",
     summary="Classify text prompt safety",
     description=(
-        "Protected stateless endpoint. Classifies a video-generation text prompt using "
+        "Protected stateless endpoint. Validates the two internal HMAC headers, classifies a video-generation "
+        "text prompt using the configured text moderation prompt, and returns the model verdict. "
+        "It does not write PostgreSQL, ClickHouse, KVRocks, or storage state. The HMAC body hash must use the "
+        "exact request bytes sent."
     ),
 )
 async def detect_text(

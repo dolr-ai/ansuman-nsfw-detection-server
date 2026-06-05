@@ -14,8 +14,9 @@ ImageServiceDep = Annotated[ImageDetectionService, Depends(get_image_detection_s
     "/detect-url",
     summary="Classify an image URL",
     description=(
-        "Protected stateless endpoint. Downloads/classifies one image URL through the configured GPU model. "
-        "It does not write PostgreSQL, ClickHouse, KVRocks, or storage state."
+        "Protected stateless endpoint. Validates the two internal HMAC headers, downloads/classifies one image URL "
+        "through the configured GPU model, and returns the model verdict. It does not write PostgreSQL, "
+        "ClickHouse, KVRocks, or storage state. The HMAC body hash must use the exact request bytes sent."
     ),
 )
 async def detect_image_url(
@@ -29,8 +30,9 @@ async def detect_image_url(
     "/detect-base64",
     summary="Classify a base64 image",
     description=(
-        "Protected stateless endpoint. Classifies one base64-encoded image through the configured GPU model. "
-        "It does not write PostgreSQL, ClickHouse, KVRocks, or storage state."
+        "Protected stateless endpoint. Validates the two internal HMAC headers, classifies one base64-encoded image "
+        "through the configured GPU model, and returns the model verdict. It does not write PostgreSQL, "
+        "ClickHouse, KVRocks, or storage state. The HMAC body hash must use the exact request bytes sent."
     ),
 )
 async def detect_image_base64(

@@ -40,4 +40,3 @@ def to_legacy_nsfw_agg(
         is_nsfw=result.final_is_nsfw,
         probability=result.final_score,
     )
-

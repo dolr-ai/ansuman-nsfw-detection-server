@@ -1,0 +1,204 @@
+name: Deploy Bare Metal Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy-baremetal-prod
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+  APP_NAME: nsfw
+  DEPLOY_DIR: /home/ansuman/nsfw
+  HOST_APP_PORT: "8001"
+  DEPLOY_USER: ${{ vars.BAREMETAL_SSH_USER || 'root' }}
+
+jobs:
+  build_check:
+    uses: ./.github/workflows/build-check.yml
+    with:
+      python-version: "3.12"
+    secrets: inherit
+
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [build_check]
+    outputs:
+      image_tag: ${{ github.sha }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,format=long,prefix=
+            type=raw,value=latest
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./deploy-baremetal/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  prepare-servers:
+    name: Prepare server matrix
+    runs-on: ubuntu-latest
+    outputs:
+      servers: ${{ steps.servers.outputs.servers }}
+
+    steps:
+      - name: Parse server list
+        id: servers
+        run: |
+          IPS="${{ vars.BAREMETAL_SERVER_IPS }}"
+          JSON=$(echo "$IPS" | tr ',' '\n' | sed '/^\s*$/d' | jq -R . | jq -s -c .)
+          echo "servers=$JSON" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy to bare metal
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [build-and-push, prepare-servers]
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        server: ${{ fromJson(needs.prepare-servers.outputs.servers) }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Write SSH key
+        run: |
+          install -m 700 -d ~/.ssh
+          install -m 600 /dev/null ~/.ssh/hetzner_baremetal_key
+          printf '%s\n' '${{ secrets.HETZNER_BARE_METAL_GITHUB_ACTIONS_SSH_PRIVATE_KEY }}' > ~/.ssh/hetzner_baremetal_key
+
+      - name: Add server to known_hosts
+        run: ssh-keyscan -H ${{ matrix.server }} >> ~/.ssh/known_hosts
+
+      - name: Check connectivity
+        run: ssh -i ~/.ssh/hetzner_baremetal_key -o ConnectTimeout=10 ${{ env.DEPLOY_USER }}@${{ matrix.server }} "echo 'Server connection successful'"
+
+      - name: Sync deployment files
+        run: |
+          ssh -i ~/.ssh/hetzner_baremetal_key ${{ env.DEPLOY_USER }}@${{ matrix.server }} "mkdir -p ${{ env.DEPLOY_DIR }}"
+          rsync -avz --delete -e "ssh -i ~/.ssh/hetzner_baremetal_key" ./deploy-baremetal/ ${{ env.DEPLOY_USER }}@${{ matrix.server }}:${{ env.DEPLOY_DIR }}/
+
+      - name: Log in to GHCR on server
+        run: |
+          ssh -i ~/.ssh/hetzner_baremetal_key ${{ env.DEPLOY_USER }}@${{ matrix.server }} "
+            echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          "
+
+      - name: Deploy stack
+        env:
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+        run: |
+          ssh -i ~/.ssh/hetzner_baremetal_key ${{ env.DEPLOY_USER }}@${{ matrix.server }} "
+            cd ${{ env.DEPLOY_DIR }} &&
+            APP_IMAGE=ghcr.io/${{ github.repository }} \
+            IMAGE_TAG=${IMAGE_TAG} \
+            HOST_APP_PORT=${{ env.HOST_APP_PORT }} \
+            docker compose pull app &&
+            APP_IMAGE=ghcr.io/${{ github.repository }} \
+            IMAGE_TAG=${IMAGE_TAG} \
+            HOST_APP_PORT=${{ env.HOST_APP_PORT }} \
+            ENVIRONMENT='production' \
+            INTERNAL_REQUEST_HMAC_SECRET='${{ secrets.PROD_INTERNAL_REQUEST_HMAC_SECRET }}' \
+            INTERNAL_REQUEST_MAX_SKEW_SEC='${{ vars.PROD_INTERNAL_REQUEST_MAX_SKEW_SEC || '300' }}' \
+            POSTGRES_DATABASE_URL='${{ secrets.PROD_POSTGRES_DATABASE_URL }}' \
+            KVROCKS_HOST='${{ secrets.PROD_KVROCKS_HOST }}' \
+            KVROCKS_PORT='${{ secrets.PROD_KVROCKS_PORT }}' \
+            KVROCKS_PASSWORD='${{ secrets.PROD_KVROCKS_PASSWORD }}' \
+            KVROCKS_TLS_ENABLED='${{ secrets.KVROCKS_TLS_ENABLED }}' \
+            KVROCKS_CLUSTER_ENABLED='${{ secrets.KVROCKS_CLUSTER_ENABLED }}' \
+            KVROCKS_SSL_CA_CERT='${{ secrets.KVROCKS_SSL_CA_CERT }}' \
+            KVROCKS_SSL_CLIENT_CERT='${{ secrets.KVROCKS_SSL_CLIENT_CERT }}' \
+            KVROCKS_SSL_CLIENT_KEY='${{ secrets.KVROCKS_SSL_CLIENT_KEY }}' \
+            CLICKHOUSE_PRIMARY_DATABASE_URL='${{ secrets.PROD_CLICKHOUSE_PRIMARY_DATABASE_URL }}' \
+            CLICKHOUSE_SECONDARY_DATABASE_URL='${{ secrets.PROD_CLICKHOUSE_SECONDARY_DATABASE_URL }}' \
+            CLICKHOUSE_SECURE='${{ vars.PROD_CLICKHOUSE_SECURE || 'true' }}' \
+            CLICKHOUSE_VERIFY='${{ vars.PROD_CLICKHOUSE_VERIFY || 'false' }}' \
+            CLICKHOUSE_DATABASE='${{ vars.PROD_CLICKHOUSE_DATABASE || 'yral' }}' \
+            CLICKHOUSE_USER='${{ secrets.PROD_CLICKHOUSE_USER }}' \
+            CLICKHOUSE_PASSWORD='${{ secrets.PROD_CLICKHOUSE_PASSWORD }}' \
+            CLICKHOUSE_NSFW_TABLE='${{ vars.PROD_CLICKHOUSE_NSFW_TABLE || 'video_nsfw_detection' }}' \
+            CLICKHOUSE_NSFW_AGG_TABLE='${{ vars.PROD_CLICKHOUSE_NSFW_AGG_TABLE || 'video_nsfw_agg' }}' \
+            STORJ_INTERFACE_URL='${{ vars.PROD_STORJ_INTERFACE_URL }}' \
+            STORJ_INTERFACE_TOKEN='${{ secrets.PROD_STORJ_INTERFACE_TOKEN }}' \
+            API_BASE_URL='${{ vars.PROD_API_BASE_URL || 'https://api.openai.com/v1' }}' \
+            API_KEY='${{ secrets.PROD_API_KEY }}' \
+            MODEL_NAME='${{ vars.PROD_MODEL_NAME }}' \
+            MODEL_PROVIDER='${{ vars.PROD_MODEL_PROVIDER || 'openai-compatible' }}' \
+            MODEL_VERSION='${{ vars.PROD_MODEL_VERSION || '' }}' \
+            SENTRY_DSN='${{ secrets.PROD_SENTRY_DSN }}' \
+            SENTRY_SEND_DEFAULT_PII='${{ vars.PROD_SENTRY_SEND_DEFAULT_PII || 'false' }}' \
+            docker compose up -d --no-deps app &&
+            sleep 20 &&
+            docker compose ps
+          "
+
+      - name: Verify deployment
+        run: |
+          ssh -i ~/.ssh/hetzner_baremetal_key ${{ env.DEPLOY_USER }}@${{ matrix.server }} "
+            cd ${{ env.DEPLOY_DIR }} &&
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+              if curl -sf http://127.0.0.1:${{ env.HOST_APP_PORT }}/health > /dev/null 2>&1; then
+                echo 'Health check passed!'
+                exit 0
+              fi
+              echo 'Attempt failed, retrying in 3s...'
+              sleep 3
+            done
+            docker compose logs --tail=50 app
+            exit 1
+          "
+
+  deployment-summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [build-and-push, deploy]
+
+    steps:
+      - name: Write summary
+        run: |
+          {
+            echo "## Bare Metal Deployment Summary"
+            echo ""
+            echo "- Image tag: \`${{ needs.build-and-push.outputs.image_tag }}\`"
+            echo "- App name: \`${{ env.APP_NAME }}\`"
+            echo "- Host port: \`${{ env.HOST_APP_PORT }}\`"
+            echo "- Deploy status: \`${{ needs.deploy.result }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

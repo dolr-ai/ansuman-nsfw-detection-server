@@ -4,7 +4,6 @@ from pathlib import Path
 from app.clients.gpu_openai import GpuOpenAIClient
 from app.clients.kvrocks import create_kvrocks_client
 from app.config.settings import Settings
-from app.repositories.kvrocks.auth_nonce_repository import InMemoryAuthNonceRepository, RedisAuthNonceRepository
 from app.repositories.kvrocks.queue_repository import InMemoryVideoQueueRepository, RedisVideoQueueRepository
 from app.services.auth_service import AuthService
 from app.services.gpu_moderation_service import GpuModerationService
@@ -12,12 +11,7 @@ from app.services.queue_service import QueueService
 
 
 def build_auth_service(settings: Settings) -> AuthService:
-    if settings.is_kvrocks_configured():
-        redis_client = create_kvrocks_client(settings)
-        nonce_repository = RedisAuthNonceRepository(redis_client)
-    else:
-        nonce_repository = InMemoryAuthNonceRepository()
-    return AuthService(settings=settings, nonce_repository=nonce_repository)
+    return AuthService(settings=settings)
 
 
 def build_queue_service(settings: Settings) -> QueueService:

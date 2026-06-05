@@ -13,4 +13,3 @@ CREATE TABLE IF NOT EXISTS yral.video_nsfw_agg
 ENGINE = ReplacingMergeTree(_updated_at)
 PARTITION BY toYYYYMM(created_at)
 ORDER BY video_id;
-

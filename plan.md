@@ -165,7 +165,6 @@ nsfw_detect/
         video_result_repository.py
       kvrocks/
         __init__.py
-        auth_nonce_repository.py
         clickhouse_buffer_repository.py
         queue_repository.py
         runtime_nsfw_repository.py
@@ -358,26 +357,25 @@ All internal endpoints require HMAC request signing.
 Headers:
 
 ```text
-X-Yral-Service: off-chain-agent
-X-Yral-Timestamp: unix timestamp seconds
-X-Yral-Nonce: unique nonce
-X-Yral-Signature: hex(hmac_sha256(secret, canonical_request))
+X-Internal-Timestamp: unix timestamp seconds
+X-Internal-Signature: hex(hmac_sha256(secret, signature_message))
 ```
 
-Canonical request:
+Signature message:
 
 ```text
-METHOD\nPATH\nTIMESTAMP\nNONCE\nSHA256(raw_body)
+TIMESTAMP\nMETHOD\nPATH\nSHA256(raw_body)
 ```
 
 Validation:
 
 - Reject missing headers.
-- Reject unknown service name.
-- Reject timestamps outside `AUTH_TIMESTAMP_SKEW_SECONDS`.
-- Reject replayed nonce using KVRocks key `nsfw:auth_nonce:{service}:{nonce}` with TTL.
+- Reject requests when `INTERNAL_REQUEST_HMAC_SECRET` is not configured without exposing a distinct auth response.
+- Reject timestamps outside `INTERNAL_REQUEST_MAX_SKEW_SEC`.
+- Reject malformed signatures before constant-time comparison.
 - Compare signatures using constant-time comparison.
 - Secret lookup comes from typed config, not from route code.
+- This auth is stateless. A captured request can be replayed inside the timestamp skew window, so `/v1` must remain internal and the skew should stay short.
 
 ### `POST /v1/videos/detect`
 
@@ -1031,7 +1029,6 @@ Rollback rules:
 Keys:
 
 ```text
-nsfw:auth_nonce:{service}:{nonce}
 nsfw:queue:video_detection
 nsfw:queue:video_detection:processing
 nsfw:queue:video_detection:retry
@@ -1179,7 +1176,6 @@ Exit criteria:
 Scope:
 
 - Implement HMAC middleware/dependency.
-- Implement KVRocks nonce replay protection.
 - Implement durable queue repository/service.
 - Implement `POST /v1/videos/detect` returning `202` after durable enqueue.
 - Implement status, health, and readiness endpoints.
@@ -1194,14 +1190,15 @@ Agent guardrails:
 
 Unit tests:
 
-- HMAC canonical string generation.
+- HMAC signature message generation.
 - Valid signature accepted.
 - Wrong signature rejected.
 - Missing signature headers rejected.
+- Malformed signature rejected.
+- Non-numeric timestamp rejected.
 - Expired timestamp rejected.
 - Future timestamp rejected.
-- Replayed nonce rejected.
-- Nonce TTL is set.
+- Timestamp-only replay window is documented.
 - Video request schema rejects missing `video_id`, `publisher_user_id`, and `source_video_uri`.
 - Queue service deduplicates existing `job_id`.
 - Queue service schedules retry with increasing backoff.
@@ -1209,7 +1206,7 @@ Unit tests:
 
 Phase integration test:
 
-- Use FastAPI test client with fake KVRocks. Submit a signed `POST /v1/videos/detect`; assert `202`, one durable queue item, nonce stored, and no worker/classification side effects.
+- Use FastAPI test client with fake KVRocks. Submit a signed `POST /v1/videos/detect`; assert `202`, one durable queue item, and no worker/classification side effects.
 - Repeat the same request; assert idempotent response and no duplicate queue item.
 
 Exit criteria:
@@ -1494,7 +1491,7 @@ Exit criteria:
 
 Use this matrix to avoid gaps:
 
-- Auth: valid signature, invalid signature, missing headers, replayed nonce, clock skew.
+- Auth: valid signature, invalid signature, missing headers, malformed signature, malformed timestamp, past/future clock skew, documented timestamp-only replay window.
 - Queue: enqueue, idempotency, claim, ack, retry, backoff, DLQ.
 - Video I/O: valid download, empty download, over-size download, timeout, redacted errors.
 - FFmpeg: valid extraction, no-video stream, corrupt video, final short frame batch.
@@ -1544,4 +1541,3 @@ make smoke-text
 2. │ video_nsfw_detection       │ ReplacingMergeTree │ video_id, policy_version, source_object_version │ toYYYYMM(created_at) │
 3. │ video_nsfw_storage_actions │ ReplacingMergeTree │ video_id, job_id, action_id                     │ toYYYYMM(created_at) │
    └────────────────────────────┴────────────────────┴─────────────────────────────────────────────────┴──────────────────────┘
-

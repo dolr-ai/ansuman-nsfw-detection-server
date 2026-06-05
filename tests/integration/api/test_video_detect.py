@@ -1,8 +1,9 @@
+import time
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import create_app
-from app.repositories.kvrocks.auth_nonce_repository import InMemoryAuthNonceRepository
 from app.repositories.kvrocks.queue_repository import InMemoryVideoQueueRepository
 from tests.conftest import signed_headers
 
@@ -23,20 +24,19 @@ def video_body() -> dict[str, object]:
 
 
 @pytest.mark.asyncio
-async def test_signed_video_detect_enqueues_once(test_settings) -> None:  # type: ignore[no-untyped-def]
+async def test_signed_video_detect_is_idempotent_by_job_id(test_settings) -> None:  # type: ignore[no-untyped-def]
     queue_repository = InMemoryVideoQueueRepository()
     app = create_app(
         settings=test_settings,
-        nonce_repository=InMemoryAuthNonceRepository(),
         queue_repository=queue_repository,
     )
     body = video_body()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        raw_body, headers = signed_headers(method="POST", path="/v1/videos/detect", body=body, nonce="nonce-1")
+        raw_body, headers = signed_headers(method="POST", path="/v1/videos/detect", body=body)
         response = await client.post("/v1/videos/detect", content=raw_body, headers=headers)
 
-        raw_body, headers = signed_headers(method="POST", path="/v1/videos/detect", body=body, nonce="nonce-2")
+        raw_body, headers = signed_headers(method="POST", path="/v1/videos/detect", body=body)
         repeat_response = await client.post("/v1/videos/detect", content=raw_body, headers=headers)
 
     assert response.status_code == 202
@@ -46,22 +46,41 @@ async def test_signed_video_detect_enqueues_once(test_settings) -> None:  # type
 
 
 @pytest.mark.asyncio
-async def test_replayed_nonce_rejected(test_settings) -> None:  # type: ignore[no-untyped-def]
+async def test_stale_timestamp_rejected(test_settings) -> None:  # type: ignore[no-untyped-def]
     app = create_app(
         settings=test_settings,
-        nonce_repository=InMemoryAuthNonceRepository(),
         queue_repository=InMemoryVideoQueueRepository(),
     )
     body = video_body()
-    raw_body, headers = signed_headers(method="POST", path="/v1/videos/detect", body=body, nonce="same-nonce")
+    raw_body, headers = signed_headers(
+        method="POST",
+        path="/v1/videos/detect",
+        body=body,
+        timestamp=str(int(time.time()) - 10_000),
+    )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        first = await client.post("/v1/videos/detect", content=raw_body, headers=headers)
-        second = await client.post("/v1/videos/detect", content=raw_body, headers=headers)
+        response = await client.post("/v1/videos/detect", content=raw_body, headers=headers)
 
-    assert first.status_code == 202
-    assert second.status_code == 401
-    assert second.json()["error"]["code"] == "auth_replayed_nonce"
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "auth_timestamp_out_of_range"
+
+
+@pytest.mark.asyncio
+async def test_missing_internal_auth_header_returns_401(test_settings) -> None:  # type: ignore[no-untyped-def]
+    app = create_app(
+        settings=test_settings,
+        queue_repository=InMemoryVideoQueueRepository(),
+    )
+    body = video_body()
+    raw_body, headers = signed_headers(method="POST", path="/v1/videos/detect", body=body)
+    headers.pop("x-internal-signature")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/v1/videos/detect", content=raw_body, headers=headers)
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "auth_missing_headers"
 
 
 @pytest.mark.asyncio
@@ -69,17 +88,29 @@ async def test_status_endpoint_returns_queued_status(test_settings) -> None:  # 
     queue_repository = InMemoryVideoQueueRepository()
     app = create_app(
         settings=test_settings,
-        nonce_repository=InMemoryAuthNonceRepository(),
         queue_repository=queue_repository,
     )
     body = video_body()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        raw_body, headers = signed_headers(method="POST", path="/v1/videos/detect", body=body, nonce="nonce-1")
+        raw_body, headers = signed_headers(method="POST", path="/v1/videos/detect", body=body)
         await client.post("/v1/videos/detect", content=raw_body, headers=headers)
 
-        raw_body, headers = signed_headers(method="GET", path="/v1/videos/video-1/status", body=None, nonce="nonce-2")
+        raw_body, headers = signed_headers(method="GET", path="/v1/videos/video-1/status", body=None)
         response = await client.request("GET", "/v1/videos/video-1/status", content=raw_body, headers=headers)
 
     assert response.status_code == 200
     assert response.json()["status"] == "queued"
+
+
+def test_openapi_marks_internal_auth_headers_required(test_settings) -> None:  # type: ignore[no-untyped-def]
+    app = create_app(
+        settings=test_settings,
+        queue_repository=InMemoryVideoQueueRepository(),
+    )
+
+    parameters = app.openapi()["paths"]["/v1/videos/detect"]["post"]["parameters"]
+    by_name = {parameter["name"]: parameter for parameter in parameters}
+
+    assert by_name["X-Internal-Timestamp"]["required"] is True
+    assert by_name["X-Internal-Signature"]["required"] is True

@@ -8,4 +8,3 @@ class LegacyNsfwAggRow(BaseModel):
     nsfw_gore: str | None
     is_nsfw: bool
     probability: float
-

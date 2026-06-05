@@ -43,30 +43,37 @@ Video status:
 GET /v1/videos/{video_id}/status
 ```
 
-All `/v1` endpoints require HMAC headers:
+All `/v1` endpoints require internal HMAC headers:
 
 ```text
-X-Yral-Service: off-chain-agent
-X-Yral-Timestamp: unix timestamp seconds
-X-Yral-Nonce: unique nonce
-X-Yral-Signature: hex(hmac_sha256(secret, canonical_request))
+X-Internal-Timestamp: unix timestamp seconds
+X-Internal-Signature: hex(hmac_sha256(secret, signature_message))
 ```
 
-Canonical request:
+Signature message:
 
 ```text
+TIMESTAMP
 METHOD
 PATH
-TIMESTAMP
-NONCE
 SHA256(raw_body)
 ```
 
-The first implementation uses KVRocks/Redis for nonce replay protection and
-durable video enqueue when KVRocks env vars are configured. Tests use in-memory
+`SHA256(raw_body)` is computed over the exact HTTP request bytes sent on the
+wire. JSON whitespace and key order therefore matter to the signature. For
+`GET /v1/videos/{video_id}/status`, sign the SHA256 of an empty body.
+
+This auth is intentionally stateless. A captured request can be replayed inside
+the timestamp skew window, so callers should keep `/v1` on the internal network
+and use short skew values where possible.
+
+Configure the shared secret with `INTERNAL_REQUEST_HMAC_SECRET`.
+
+KVRocks/Redis is used for durable video enqueue when KVRocks env vars are
+configured. It is not used for HMAC nonce storage. Tests use in-memory
 repositories through the same interfaces.
 
 ## Legacy
 
-The previous gRPC service and old GCS/BigQuery pipeline code live under
-`app/legacy/`. New production modules must not import from `app/legacy/`.
+The previous gRPC service and old GCS/BigQuery pipeline are not part of the new
+REST path. New production modules must not import from `app/legacy/`.

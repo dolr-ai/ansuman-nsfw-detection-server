@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Any
 
-from pydantic import AliasChoices, Field, SecretStr, model_validator
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,10 +16,15 @@ class Settings(BaseSettings):
     app_name: str = "yral-nsfw-detector"
     environment: str = "local"
 
-    nsfw_grpc_token: SecretStr | None = Field(default=None, repr=False, alias="NSFW_GRPC_TOKEN")
-    service_hmac_secrets: dict[str, SecretStr] = Field(default_factory=dict, repr=False)
-    auth_timestamp_skew_seconds: int = 300
-    auth_nonce_ttl_seconds: int = 600
+    internal_request_hmac_secret: SecretStr | None = Field(
+        default=None,
+        repr=False,
+        alias="INTERNAL_REQUEST_HMAC_SECRET",
+    )
+    internal_request_max_skew_sec: int = Field(
+        default=300,
+        alias="INTERNAL_REQUEST_MAX_SKEW_SEC",
+    )
 
     postgres_database_url: SecretStr | None = Field(default=None, repr=False, alias="POSTGRES_DATABASE_URL")
 
@@ -94,17 +99,10 @@ class Settings(BaseSettings):
     clickhouse_buffer_storage_actions_key: str = "nsfw:clickhouse_buffer:storage_actions"
     runtime_nsfw_key_prefix: str = "offchain:video_nsfw:"
 
-    @model_validator(mode="after")
-    def load_compat_hmac_secret(self) -> "Settings":
-        if not self.service_hmac_secrets and self.nsfw_grpc_token is not None:
-            self.service_hmac_secrets = {"off-chain-agent": self.nsfw_grpc_token}
-        return self
-
-    def secret_for_service(self, service_name: str) -> str | None:
-        secret = self.service_hmac_secrets.get(service_name)
-        if secret is None:
+    def internal_request_secret(self) -> str | None:
+        if self.internal_request_hmac_secret is None:
             return None
-        return secret.get_secret_value()
+        return self.internal_request_hmac_secret.get_secret_value()
 
     def is_kvrocks_configured(self) -> bool:
         return bool(self.kvrocks_host)

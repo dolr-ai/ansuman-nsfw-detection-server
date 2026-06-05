@@ -1,12 +1,7 @@
-SERVICE_HEADER = "x-yral-service"
-TIMESTAMP_HEADER = "x-yral-timestamp"
-NONCE_HEADER = "x-yral-nonce"
-SIGNATURE_HEADER = "x-yral-signature"
+TIMESTAMP_HEADER = "x-internal-timestamp"
+SIGNATURE_HEADER = "x-internal-signature"
 
 SIGNED_REQUEST_HEADERS = (
-    SERVICE_HEADER,
     TIMESTAMP_HEADER,
-    NONCE_HEADER,
     SIGNATURE_HEADER,
 )
-

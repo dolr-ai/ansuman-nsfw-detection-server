@@ -10,10 +10,6 @@ from app.services.queue_service import QueueService
 from app.services.readiness_service import ReadinessService
 from app.services.text_detection_service import TextDetectionService
 
-HMAC_HEADER_DOC = (
-    "Required for all `/v1` internal routes."
-)
-
 
 def get_settings(request: Request) -> Settings:
     return request.app.state.settings
@@ -37,27 +33,25 @@ def get_text_detection_service(request: Request) -> TextDetectionService:
 
 async def require_signed_request(
     request: Request,
-    x_yral_service: Annotated[
-        str | None,
+    x_internal_timestamp: Annotated[
+        str,
         Header(
-            alias="X-Yral-Service",
-            description="Calling internal service name, for example `off-chain-agent`.",
+            alias="X-Internal-Timestamp",
+            description=(
+                "Unix epoch seconds. The HMAC message is "
+                "`<timestamp>\\n<METHOD>\\n<path>\\n<SHA256(raw_body)>`."
+            ),
         ),
-    ] = None,
-    x_yral_timestamp: Annotated[
-        str | None,
-        Header(alias="X-Yral-Timestamp", description="Unix timestamp in seconds used in the signature."),
-    ] = None,
-    x_yral_nonce: Annotated[
-        str | None,
-        Header(alias="X-Yral-Nonce", description="Unique nonce for replay protection."),
-    ] = None,
-    x_yral_signature: Annotated[
-        str | None,
-        Header(alias="X-Yral-Signature", description=HMAC_HEADER_DOC),
-    ] = None,
+    ],
+    x_internal_signature: Annotated[
+        str,
+        Header(
+            alias="X-Internal-Signature",
+            description="Hex HMAC-SHA256 signature using the internal shared secret.",
+        ),
+    ],
 ) -> SignedRequestContext:
-    _ = (x_yral_service, x_yral_timestamp, x_yral_nonce, x_yral_signature)
+    _ = (x_internal_timestamp, x_internal_signature)
     auth_service: AuthService = request.app.state.auth_service
     return await auth_service.authenticate(
         method=request.method,

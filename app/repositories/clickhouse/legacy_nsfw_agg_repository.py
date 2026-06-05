@@ -8,4 +8,3 @@ class ClickHouseLegacyNsfwAggRepository(ClickHouseRepository):
             return
         payload = [row.model_dump(mode="json") for row in rows]
         self.client.insert(self.table(table_name), payload)
-

@@ -1,10 +1,11 @@
 from fastapi import Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.errors import codes
 from app.errors.base import AppError
-from app.errors.codes import VALIDATION_ERROR
 
 
 async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
@@ -24,6 +25,22 @@ async def http_error_handler(_: Request, exc: StarletteHTTPException) -> JSONRes
 async def validation_error_handler(_: Request, exc: ValidationError) -> JSONResponse:
     return JSONResponse(
         status_code=422,
-        content={"error": {"code": VALIDATION_ERROR, "message": str(exc)}},
+        content={"error": {"code": codes.VALIDATION_ERROR, "message": str(exc)}},
     )
 
+
+async def request_validation_error_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+    missing_headers = {
+        str(error["loc"][1]).lower()
+        for error in exc.errors()
+        if len(error["loc"]) >= 2 and error["loc"][0] == "header" and error["type"] == "missing"
+    }
+    if missing_headers & {"x-internal-timestamp", "x-internal-signature"}:
+        return JSONResponse(
+            status_code=401,
+            content={"error": {"code": codes.AUTH_MISSING_HEADERS, "message": "missing internal auth headers"}},
+        )
+    return JSONResponse(
+        status_code=422,
+        content={"error": {"code": codes.VALIDATION_ERROR, "message": str(exc)}},
+    )

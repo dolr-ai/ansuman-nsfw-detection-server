@@ -6,15 +6,14 @@ from uuid import uuid4
 import httpx
 
 from app.config.settings import Settings
-from app.core.security import canonical_request, sign_canonical_request
+from app.core.security import sign_request
 
 
 async def main() -> None:
     settings = Settings()
-    service = "off-chain-agent"
-    secret = settings.secret_for_service(service)
+    secret = settings.internal_request_secret()
     if secret is None:
-        raise SystemExit("off-chain-agent HMAC secret is not configured")
+        raise SystemExit("internal request HMAC secret is not configured")
 
     body = {
         "job_id": "nsfw:smoke-video:nsfw_policy_v1:",
@@ -26,17 +25,13 @@ async def main() -> None:
     }
     raw_body = json.dumps(body, separators=(",", ":")).encode("utf-8")
     timestamp = str(int(time.time()))
-    nonce = str(uuid4())
     path = "/v1/videos/detect"
-    signature = sign_canonical_request(
+    signature = sign_request(
         secret,
-        canonical_request(
-            method="POST",
-            path=path,
-            timestamp=timestamp,
-            nonce=nonce,
-            raw_body=raw_body,
-        ),
+        timestamp=timestamp,
+        method="POST",
+        path=path,
+        body=raw_body,
     )
     async with httpx.AsyncClient(base_url=settings.api_base_url or "http://localhost:8080") as client:
         response = await client.post(
@@ -44,10 +39,8 @@ async def main() -> None:
             content=raw_body,
             headers={
                 "content-type": "application/json",
-                "x-yral-service": service,
-                "x-yral-timestamp": timestamp,
-                "x-yral-nonce": nonce,
-                "x-yral-signature": signature,
+                "x-internal-timestamp": timestamp,
+                "x-internal-signature": signature,
             },
         )
         print(response.status_code)
@@ -56,4 +49,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-

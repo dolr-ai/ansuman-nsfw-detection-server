@@ -18,9 +18,11 @@ QueueServiceDep = Annotated[QueueService, Depends(get_queue_service)]
     status_code=status.HTTP_202_ACCEPTED,
     summary="Enqueue video NSFW detection",
     description=(
-        "Protected internal endpoint. Validates the signed request, stores the video job in the durable queue, "
+        "Protected internal endpoint. Validates `X-Internal-Timestamp` and `X-Internal-Signature`, "
+        "stores the video job in the durable queue, "
         "and returns `202 Accepted`. Classification happens asynchronously in workers.\n\n"
-        "Required HMAC headers: `X-Yral-Service`, `X-Yral-Timestamp`, `X-Yral-Nonce`, `X-Yral-Signature`."
+        "Sign `<timestamp>\\nPOST\\n/v1/videos/detect\\n<SHA256(raw JSON body)>` with HMAC-SHA256. "
+        "The body hash must use the exact request bytes sent."
     ),
 )
 async def detect_video(
@@ -41,8 +43,8 @@ async def detect_video(
     response_model=VideoStatusResponse,
     summary="Get video detection status",
     description=(
-        "Protected internal endpoint. Returns the latest known queue/classification state for a video. "
-        "For this GET request, sign an empty raw body when computing the HMAC canonical request."
+        "Protected internal endpoint. Returns the latest known queue/classification state for a video.\n\n"
+        "Sign `<timestamp>\\nGET\\n/v1/videos/{video_id}/status\\n<SHA256(empty body)>` with HMAC-SHA256."
     ),
 )
 async def video_status(
