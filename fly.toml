@@ -1,0 +1,38 @@
+# fly.toml app configuration file generated for yral-nsfw-classification on 2024-10-01T07:13:02+05:30
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'prod-yral-nsfw-classification'
+primary_region = 'ams'
+kill_signal = 'SIGINT'
+kill_timeout = '5s'
+swap_size_mb = 32768
+
+[env]
+PORT = '50051'
+
+[[services]]
+protocol = 'tcp'
+internal_port = 50051
+auto_stop_machines = true
+auto_start_machines = true
+
+[[services.ports]]
+port = 443
+handlers = ['tls', 'http']
+
+[services.ports.http_options]
+h2_backend = true
+
+[services.ports.tls_options]
+alpn = ['h2']
+
+[services.concurrency]
+hard_limit = 2500
+soft_limit = 250
+
+[[vm]]
+memory = '8gb'
+cpu_kind = 'performance'
+cpus = 1

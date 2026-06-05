@@ -1,0 +1,10 @@
+NSFW_JWT_PUB_KEY = "-----BEGIN PUBLIC KEY-----\
+MCowBQYDK2VwAyEA9zi53RuUKNEgopKZPOycJFaPdaBBG7WDWB8OSaz/jWM=\
+-----END PUBLIC KEY-----"
+
+# NSFW_JWT_PUB_KEY_PROD = "-----BEGIN PUBLIC KEY-----\
+# MCowBQYDK2VwAyEA7e47Br+mHdlETtxFlmsHn2xv8bH16tF1oLPfnL0jgSY=\
+# -----END PUBLIC KEY-----"
+
+PROJECT_NAME = "hot-or-not-feed-intelligence"
+EMBEDDING_DIM = 1408
