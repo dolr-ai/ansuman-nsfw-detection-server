@@ -6,7 +6,7 @@ from app.errors.base import AppError
 from app.schemas.model_output import parse_text_moderation_response, parse_visual_batch_response
 
 
-def frame(index: int, *, top_category: str = "safe", is_nsfw: bool = False, severity: int = 0) -> dict[str, object]:
+def frame(index: int, *, top_category: str = "safe", severity: int = 0) -> dict[str, object]:
     categories = {
         "safe": 0,
         "suggestive": 0,
@@ -24,8 +24,6 @@ def frame(index: int, *, top_category: str = "safe", is_nsfw: bool = False, seve
     return {
         "frame_index": index,
         "top_category": top_category,
-        "is_nsfw": is_nsfw,
-        "overall_severity": severity,
         "categories": categories,
         "reason": "fixture",
     }
@@ -50,35 +48,56 @@ def test_rejects_wrong_count() -> None:
 
 
 def test_rejects_out_of_range_severity() -> None:
-    payload = [frame(0, top_category="porn", is_nsfw=True, severity=6)]
+    payload = [frame(0, top_category="porn", severity=6)]
 
     with pytest.raises(AppError):
         parse_visual_batch_response(json.dumps(payload), expected_count=1)
 
 
-def text_payload(*, top_category: str = "safe", severity: int = 0, should_block: bool = False) -> dict[str, object]:
-    payload = frame(0, top_category=top_category, is_nsfw=should_block, severity=severity)
+def text_payload(*, top_category: str = "safe", severity: int = 0) -> dict[str, object]:
+    payload = frame(0, top_category=top_category, severity=severity)
     payload.pop("frame_index")
-    payload["should_block"] = should_block
     return payload
 
 
-def test_parse_text_moderation_response_accepts_prompt_shape() -> None:
-    parsed = parse_text_moderation_response(
-        json.dumps(text_payload(top_category="porn", severity=4, should_block=True))
-    )
+def test_parse_text_moderation_response_accepts_prompt_shape_and_computes_policy_fields() -> None:
+    parsed = parse_text_moderation_response(json.dumps(text_payload(top_category="porn", severity=4)))
 
     assert parsed.top_category == "porn"
-    assert parsed.should_block is True
+    assert parsed.overall_severity == 4
+    assert parsed.is_nsfw is True
 
 
-def test_parse_text_moderation_response_rejects_blocking_rule_mismatch() -> None:
+def test_parse_text_moderation_response_ignores_legacy_policy_fields() -> None:
+    payload = text_payload(top_category="nudity", severity=4)
+    payload["is_nsfw"] = True
+    payload["should_block"] = True
+    payload["overall_severity"] = 5
+
+    parsed = parse_text_moderation_response(json.dumps(payload))
+
+    assert parsed.overall_severity == 4
+    assert parsed.is_nsfw is False
+
+
+def test_parse_text_moderation_response_rejects_safe_top_category_with_unsafe_scores() -> None:
+    payload = text_payload(top_category="safe", severity=0)
+    payload["categories"]["porn"] = 4
+
     with pytest.raises(AppError):
-        parse_text_moderation_response(json.dumps(text_payload(top_category="violence", severity=3, should_block=True)))
+        parse_text_moderation_response(json.dumps(payload))
 
 
-def test_parse_text_moderation_response_requires_sexual_minor_block() -> None:
+def test_parse_text_moderation_response_rejects_top_category_that_is_not_highest_score() -> None:
+    payload = text_payload(top_category="suggestive", severity=2)
+    payload["categories"]["porn"] = 4
+
     with pytest.raises(AppError):
-        parse_text_moderation_response(
-            json.dumps(text_payload(top_category="sexual_minor_content", severity=4, should_block=True))
-        )
+        parse_text_moderation_response(json.dumps(payload))
+
+
+def test_parse_text_moderation_response_blocks_sexual_minor_content_at_three() -> None:
+    parsed = parse_text_moderation_response(json.dumps(text_payload(top_category="sexual_minor_content", severity=3)))
+
+    assert parsed.overall_severity == 3
+    assert parsed.is_nsfw is True

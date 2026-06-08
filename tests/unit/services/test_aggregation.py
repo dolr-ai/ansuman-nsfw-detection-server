@@ -64,6 +64,21 @@ def test_one_nsfw_frame_flags_video(test_settings) -> None:  # type: ignore[no-u
     assert final.final_top_category == "porn"
 
 
+def test_low_severity_unsafe_category_does_not_flag_without_policy_boolean(test_settings) -> None:  # type: ignore[no-untyped-def]
+    service = AggregationService(test_settings)
+
+    final = service.aggregate(
+        job_id="job",
+        video_id="video",
+        policy_version="nsfw_policy_v1",
+        frames=[result(0, "suggestive", 3, is_nsfw=False)],
+    )
+
+    assert final.final_is_nsfw is False
+    assert final.nsfw_frame_count == 0
+    assert final.final_score == 0.6
+
+
 def test_risk_tiebreak_prefers_sexual_minor_content(test_settings) -> None:  # type: ignore[no-untyped-def]
     service = AggregationService(test_settings)
 

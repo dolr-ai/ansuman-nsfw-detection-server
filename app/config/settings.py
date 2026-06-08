@@ -77,6 +77,8 @@ class Settings(BaseSettings):
 
     default_policy_version: str = "nsfw_policy_v1"
     visual_prompt_version: str = "visual_batch_moderation_v1"
+    image_prompt_version: str = "image_generation_moderation_v1"
+    image_text_prompt_version: str = "image_prompt_generation_moderation_v1"
     text_prompt_version: str = "text_moderation_v1"
     aggregation_version: str = "hard_any_frame_v1"
     frame_batch_size: int = 5

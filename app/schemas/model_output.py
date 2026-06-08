@@ -1,79 +1,57 @@
 import json
-from typing import Literal
 
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, computed_field, field_validator, model_validator
 
 from app.core.constants import MODERATION_CATEGORIES
 from app.errors.base import AppError
 from app.errors.codes import VALIDATION_ERROR
+from app.schemas.moderation import ModerationCategory, validate_category_scores
+from app.services.moderation_policy import compute_is_nsfw, compute_overall_severity
 
-ModerationCategory = Literal[
-    "safe",
-    "suggestive",
-    "nudity",
-    "porn",
-    "gore",
-    "violence",
-    "self_harm",
-    "hate_or_extremism",
-    "drugs",
-    "unknown",
-    "sexual_minor_content",
-]
+UNSAFE_MODEL_CATEGORIES = tuple(category for category in MODERATION_CATEGORIES if category != "safe")
 
 
-class FrameModerationOutput(BaseModel):
+class ModerationModelOutput(BaseModel):
+    top_category: ModerationCategory
+    categories: dict[str, int]
+    reason: str
+
+    @field_validator("categories")
+    @classmethod
+    def validate_categories(cls, value: dict[str, int]) -> dict[str, int]:
+        return validate_category_scores(value)
+
+    @model_validator(mode="after")
+    def top_category_matches_scores(self) -> "ModerationModelOutput":
+        max_unsafe_severity = max(self.categories[category] for category in UNSAFE_MODEL_CATEGORIES)
+        if self.top_category == "safe":
+            if max_unsafe_severity != 0:
+                raise ValueError("top_category safe requires all unsafe categories to be 0")
+            return self
+        top_category_severity = self.categories[self.top_category]
+        if top_category_severity == 0:
+            raise ValueError("top_category severity must be present for unsafe categories")
+        if top_category_severity < max_unsafe_severity:
+            raise ValueError("top_category must have the highest unsafe category severity")
+        return self
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def overall_severity(self) -> int:
+        return compute_overall_severity(self.top_category, self.categories)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def is_nsfw(self) -> bool:
+        return compute_is_nsfw(self.categories)
+
+
+class FrameModerationOutput(ModerationModelOutput):
     frame_index: int = Field(ge=0)
-    top_category: ModerationCategory
-    is_nsfw: bool
-    overall_severity: int = Field(ge=0, le=5)
-    categories: dict[str, int]
-    reason: str
-
-    @field_validator("categories")
-    @classmethod
-    def validate_categories(cls, value: dict[str, int]) -> dict[str, int]:
-        expected = set(MODERATION_CATEGORIES)
-        actual = set(value)
-        if actual != expected:
-            missing = sorted(expected - actual)
-            extra = sorted(actual - expected)
-            raise ValueError(f"categories mismatch missing={missing} extra={extra}")
-        for category, severity in value.items():
-            if not isinstance(severity, int) or severity < 0 or severity > 5:
-                raise ValueError(f"{category} severity must be an integer between 0 and 5")
-        return value
-
-    @model_validator(mode="after")
-    def top_category_has_score(self) -> "FrameModerationOutput":
-        if self.top_category != "safe" and self.categories[self.top_category] == 0:
-            raise ValueError("top_category severity must be present for unsafe categories")
-        return self
 
 
-class TextModerationOutput(BaseModel):
-    top_category: ModerationCategory
-    is_nsfw: bool
-    should_block: bool
-    overall_severity: int = Field(ge=0, le=5)
-    categories: dict[str, int]
-    reason: str
-
-    @field_validator("categories")
-    @classmethod
-    def validate_categories(cls, value: dict[str, int]) -> dict[str, int]:
-        return FrameModerationOutput.validate_categories(value)
-
-    @model_validator(mode="after")
-    def validate_blocking_rules(self) -> "TextModerationOutput":
-        if self.top_category == "sexual_minor_content":
-            if not self.should_block or self.overall_severity != 5:
-                raise ValueError("sexual_minor_content must block with severity 5")
-        elif self.should_block != (self.overall_severity >= 4):
-            raise ValueError("should_block must match overall_severity >= 4")
-        if self.top_category != "safe" and self.categories[self.top_category] == 0:
-            raise ValueError("top_category severity must be present for unsafe categories")
-        return self
+class TextModerationOutput(ModerationModelOutput):
+    pass
 
 
 def parse_visual_batch_response(raw_response: str, expected_count: int) -> list[FrameModerationOutput]:

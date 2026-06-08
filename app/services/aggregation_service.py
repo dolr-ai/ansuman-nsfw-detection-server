@@ -1,14 +1,14 @@
 from datetime import UTC, datetime
 
 from app.config.settings import Settings
-from app.core.constants import MODERATION_CATEGORIES, RISK_ORDER, UNSAFE_CATEGORIES
+from app.core.constants import MODERATION_CATEGORIES, RISK_ORDER
 from app.models.frame_result import FrameModerationResult
 from app.models.video_result import VideoModerationResult
 from app.services.legacy_mapping_service import map_legacy_nsfw_ec, map_legacy_nsfw_gore
 
 
 def frame_is_nsfw(frame: FrameModerationResult) -> bool:
-    return frame.is_nsfw or frame.top_category in UNSAFE_CATEGORIES or frame.overall_severity >= 3
+    return frame.is_nsfw
 
 
 class AggregationService:
@@ -85,4 +85,3 @@ class AggregationService:
         highest_severity = best.overall_severity
         candidates = [frame.top_category for frame in frames if frame.overall_severity == highest_severity]
         return min(candidates, key=lambda category: risk_rank.get(category, len(RISK_ORDER)))
-

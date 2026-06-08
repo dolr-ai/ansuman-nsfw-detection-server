@@ -32,13 +32,10 @@ def model_frame(
     *,
     top_category: str = "safe",
     severity: int = 0,
-    is_nsfw: bool = False,
 ) -> dict[str, object]:
     return {
         "frame_index": index,
         "top_category": top_category,
-        "is_nsfw": is_nsfw,
-        "overall_severity": severity,
         "categories": categories(**{top_category: severity}),
         "reason": "fixture",
     }
@@ -51,9 +48,11 @@ class FakeVisualClient:
         self.calls = 0
         self.active = 0
         self.max_active = 0
+        self.prompts: list[str] = []
 
     async def moderate_images(self, *, prompt: str, image_paths: list[Path]) -> str:
         self.calls += 1
+        self.prompts.append(prompt)
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         try:
@@ -88,7 +87,7 @@ def frames(tmp_path: Path, count: int) -> list[ExtractedFrame]:
 @pytest.mark.asyncio
 async def test_moderate_frame_batch_maps_model_order_to_original_frames(test_settings, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     client = FakeVisualClient(
-        [json.dumps([model_frame(0), model_frame(1, top_category="porn", severity=4, is_nsfw=True)])]
+        [json.dumps([model_frame(0), model_frame(1, top_category="porn", severity=4)])]
     )
     service = GpuModerationService(settings=test_settings, visual_client=client, visual_prompt="prompt")
 
@@ -96,6 +95,8 @@ async def test_moderate_frame_batch_maps_model_order_to_original_frames(test_set
 
     assert [result.frame_index for result in results] == [10, 11]
     assert results[1].top_category == "porn"
+    assert results[1].overall_severity == 4
+    assert results[1].is_nsfw is True
 
 
 @pytest.mark.asyncio
@@ -132,11 +133,41 @@ async def test_gpu_concurrency_is_limited(test_settings, tmp_path: Path) -> None
 
 
 @pytest.mark.asyncio
+async def test_moderate_image_generation_uses_image_prompt(test_settings, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    client = FakeVisualClient([json.dumps([model_frame(0)])])
+    service = GpuModerationService(
+        settings=test_settings,
+        visual_client=client,
+        visual_prompt="visual",
+        image_prompt="image generation prompt",
+    )
+
+    result = await service.moderate_image_generation(frames(tmp_path, 1)[0])
+
+    assert result.top_category == "safe"
+    assert client.prompts == ["image generation prompt"]
+
+
+@pytest.mark.asyncio
+async def test_moderate_image_generation_uses_joint_image_prompt(test_settings, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    client = FakeVisualClient([json.dumps([model_frame(0, top_category="porn", severity=4)])])
+    service = GpuModerationService(
+        settings=test_settings,
+        visual_client=client,
+        visual_prompt="visual",
+        image_text_prompt="joint prompt",
+    )
+
+    result = await service.moderate_image_generation(frames(tmp_path, 1)[0], generation_prompt="make her nude")
+
+    assert result.is_nsfw is True
+    assert client.prompts[0].startswith("joint prompt")
+    assert "<<<GENERATION_PROMPT>>>\nmake her nude\n<<<END_GENERATION_PROMPT>>>" in client.prompts[0]
+
+
+@pytest.mark.asyncio
 async def test_moderate_text_retries_malformed_response(test_settings) -> None:  # type: ignore[no-untyped-def]
-    payload = {
-        **model_frame(0, top_category="safe", severity=0),
-        "should_block": False,
-    }
+    payload = model_frame(0, top_category="safe", severity=0)
     payload.pop("frame_index")
     client = FakeTextClient(["bad-json", json.dumps(payload)])
     service = GpuModerationService(

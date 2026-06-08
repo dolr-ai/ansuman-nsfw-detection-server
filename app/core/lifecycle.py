@@ -26,13 +26,18 @@ def build_queue_service(settings: Settings) -> QueueService:
 def build_gpu_moderation_service(settings: Settings) -> GpuModerationService | None:
     if not settings.is_gpu_configured():
         return None
-    prompt_path = Path(__file__).resolve().parents[1] / "prompts" / f"{settings.visual_prompt_version}.txt"
-    text_prompt_path = Path(__file__).resolve().parents[1] / "prompts" / f"{settings.text_prompt_version}.txt"
+    prompts_dir = Path(__file__).resolve().parents[1] / "prompts"
+    prompt_path = prompts_dir / f"{settings.visual_prompt_version}.txt"
+    image_prompt_path = prompts_dir / f"{settings.image_prompt_version}.txt"
+    image_text_prompt_path = prompts_dir / f"{settings.image_text_prompt_version}.txt"
+    text_prompt_path = prompts_dir / f"{settings.text_prompt_version}.txt"
     client = GpuOpenAIClient(settings)
     return GpuModerationService(
         settings=settings,
         visual_client=client,
         visual_prompt=prompt_path.read_text(encoding="utf-8"),
+        image_prompt=image_prompt_path.read_text(encoding="utf-8"),
+        image_text_prompt=image_text_prompt_path.read_text(encoding="utf-8"),
         text_client=client,
         text_prompt=text_prompt_path.read_text(encoding="utf-8"),
     )

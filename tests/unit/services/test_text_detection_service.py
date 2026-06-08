@@ -9,9 +9,6 @@ class FakeGpuService:
     async def moderate_text(self, text: str) -> TextModerationOutput:
         return TextModerationOutput(
             top_category="safe",
-            is_nsfw=False,
-            should_block=False,
-            overall_severity=0,
             categories={
                 "safe": 0,
                 "suggestive": 0,
@@ -35,8 +32,9 @@ async def test_text_detection_returns_structured_result() -> None:
 
     result = await service.detect("a normal dance video")
 
-    assert result["top_category"] == "safe"
-    assert result["should_block"] is False
+    assert result.top_category == "safe"
+    assert result.is_nsfw is False
+    assert "should_block" not in result.model_dump(mode="json")
 
 
 @pytest.mark.asyncio
@@ -47,4 +45,3 @@ async def test_text_detection_requires_gpu() -> None:
         await service.detect("a normal dance video")
 
     assert exc.value.code == "gpu_not_configured"
-
