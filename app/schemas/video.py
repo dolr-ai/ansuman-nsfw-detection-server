@@ -59,6 +59,24 @@ class VideoDetectResponse(BaseModel):
     trace_id: str | None = None
 
 
+class VideoFinalResultResponse(BaseModel):
+    policy_version: str
+    prompt_version: str
+    aggregation_version: str
+    final_is_nsfw: bool
+    final_score: float
+    final_top_category: str
+    max_overall_severity: int
+    nsfw_frame_count: int
+    total_frame_count: int
+    move_required: bool
+    move_threshold: float
+    max_category_severities: dict[str, int]
+    legacy_nsfw_ec: str
+    legacy_nsfw_gore: str
+    final_response: dict[str, object]
+
+
 class VideoStatusResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -71,7 +89,23 @@ class VideoStatusResponse(BaseModel):
                     "attempts": 1,
                     "last_error_code": None,
                     "last_error_message": None,
-                    "final_result": {"final_is_nsfw": False, "final_score": 0.0},
+                    "final_result": {
+                        "policy_version": "nsfw_policy_v1",
+                        "prompt_version": "visual_batch_moderation_v1",
+                        "aggregation_version": "hard_any_frame_v1",
+                        "final_is_nsfw": False,
+                        "final_score": 0.0,
+                        "final_top_category": "safe",
+                        "max_overall_severity": 0,
+                        "nsfw_frame_count": 0,
+                        "total_frame_count": 5,
+                        "move_required": False,
+                        "move_threshold": 0.8,
+                        "max_category_severities": {"safe": 0},
+                        "legacy_nsfw_ec": "neutral",
+                        "legacy_nsfw_gore": "VERY_UNLIKELY",
+                        "final_response": {"final_is_nsfw": False},
+                    },
                 }
             ]
         }
@@ -84,4 +118,4 @@ class VideoStatusResponse(BaseModel):
     attempts: int = 0
     last_error_code: str | None = None
     last_error_message: str | None = None
-    final_result: dict[str, object] | None = None
+    final_result: VideoFinalResultResponse | None = None

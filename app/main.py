@@ -9,7 +9,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.router import api_router
 from app.config.logging import configure_logging
 from app.config.settings import Settings
-from app.core.lifecycle import build_auth_service, build_gpu_moderation_service, build_queue_service
+from app.core.lifecycle import (
+    build_auth_service,
+    build_gpu_moderation_service,
+    build_queue_service,
+    build_video_status_service,
+)
 from app.core.sentry import init_sentry
 from app.errors.base import AppError
 from app.errors.http import (
@@ -24,12 +29,14 @@ from app.services.image_detection_service import ImageDetectionService
 from app.services.queue_service import QueueService
 from app.services.readiness_service import ReadinessService
 from app.services.text_detection_service import TextDetectionService
+from app.services.video_status_service import VideoResultReader
 
 
 def create_app(
     *,
     settings: Settings | None = None,
     queue_repository: VideoQueueRepository | None = None,
+    video_result_reader: VideoResultReader | None = None,
 ) -> FastAPI:
     configure_logging()
     resolved_settings = settings or Settings()
@@ -50,9 +57,16 @@ def create_app(
     app.state.settings = resolved_settings
     app.state.auth_service = build_auth_service(resolved_settings)
     if queue_repository is not None:
-        app.state.queue_service = QueueService(queue_repository)
+        queue_service = QueueService(queue_repository)
     else:
-        app.state.queue_service = build_queue_service(resolved_settings)
+        queue_service = build_queue_service(resolved_settings)
+    app.state.queue_service = queue_service
+    app.state.video_status_service = build_video_status_service(
+        resolved_settings,
+        queue_service=queue_service,
+        result_reader=video_result_reader,
+        use_postgres_reader=queue_repository is None,
+    )
 
     app.state.readiness_service = ReadinessService(resolved_settings)
     gpu_service = build_gpu_moderation_service(resolved_settings)

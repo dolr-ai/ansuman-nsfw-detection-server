@@ -2,14 +2,16 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 
-from app.api.deps import get_queue_service
+from app.api.deps import get_queue_service, get_video_status_service
 from app.errors.base import AppError
 from app.errors.codes import NOT_FOUND
 from app.schemas.video import VideoDetectRequest, VideoDetectResponse, VideoStatusResponse
 from app.services.queue_service import QueueService
+from app.services.video_status_service import VideoStatusService
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 QueueServiceDep = Annotated[QueueService, Depends(get_queue_service)]
+VideoStatusServiceDep = Annotated[VideoStatusService, Depends(get_video_status_service)]
 
 
 @router.post(
@@ -49,18 +51,9 @@ async def detect_video(
 )
 async def video_status(
     video_id: str,
-    queue_service: QueueServiceDep,
+    video_status_service: VideoStatusServiceDep,
 ) -> VideoStatusResponse:
-    job = await queue_service.get_status_by_video_id(video_id)
-    if job is None:
+    response = await video_status_service.get_status_by_video_id(video_id)
+    if response is None:
         raise AppError(NOT_FOUND, "video job not found", status_code=404)
-    return VideoStatusResponse(
-        job_id=job.job_id,
-        video_id=job.video_id,
-        status=job.status,
-        trace_id=job.trace_id,
-        attempts=job.attempts,
-        last_error_code=job.last_error_code,
-        last_error_message=job.last_error_message,
-        final_result=None,
-    )
+    return response

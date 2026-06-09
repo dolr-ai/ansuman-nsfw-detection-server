@@ -8,7 +8,7 @@ from app.models.video_result import VideoModerationResult
 from app.repositories.postgres.frame_result_repository import frame_result_to_row
 from app.repositories.postgres.storage_action_repository import storage_action_to_row
 from app.repositories.postgres.video_job_repository import video_job_to_row
-from app.repositories.postgres.video_result_repository import video_result_to_row
+from app.repositories.postgres.video_result_repository import row_to_video_result, video_result_to_row
 
 
 def categories(**overrides: int) -> dict[str, int]:
@@ -107,6 +107,35 @@ def test_video_result_serializes_final_result() -> None:
     assert row["move_required"] is True
 
 
+def test_video_result_deserializes_final_result() -> None:
+    now = datetime.now(UTC)
+    row = {
+        "job_id": "job",
+        "video_id": "video",
+        "policy_version": "nsfw_policy_v1",
+        "prompt_version": "visual_batch_moderation_v1",
+        "aggregation_version": "hard_any_frame_v1",
+        "final_is_nsfw": True,
+        "final_score": 0.8,
+        "final_top_category": "porn",
+        "max_overall_severity": 4,
+        "nsfw_frame_count": 1,
+        "total_frame_count": 5,
+        "move_required": True,
+        "move_threshold": 0.8,
+        "legacy_nsfw_ec": "explicit",
+        "legacy_nsfw_gore": "VERY_UNLIKELY",
+        "final_response": {"max_category_severities": {"porn": 4}},
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    result = row_to_video_result(row)
+
+    assert result.final_top_category == "porn"
+    assert result.max_category_severities == {"porn": 4}
+
+
 def test_storage_action_serializes_request_and_response() -> None:
     now = datetime.now(UTC)
     row = storage_action_to_row(
@@ -130,4 +159,3 @@ def test_storage_action_serializes_request_and_response() -> None:
 
     assert row["request_body"] == {"video_id": "video"}
     assert row["response_status"] == 200
-

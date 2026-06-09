@@ -9,6 +9,7 @@ from app.services.image_detection_service import ImageDetectionService
 from app.services.queue_service import QueueService
 from app.services.readiness_service import ReadinessService
 from app.services.text_detection_service import TextDetectionService
+from app.services.video_status_service import VideoStatusService
 
 
 def get_settings(request: Request) -> Settings:
@@ -29,6 +30,10 @@ def get_image_detection_service(request: Request) -> ImageDetectionService:
 
 def get_text_detection_service(request: Request) -> TextDetectionService:
     return request.app.state.text_detection_service
+
+
+def get_video_status_service(request: Request) -> VideoStatusService:
+    return request.app.state.video_status_service
 
 
 async def require_signed_request(

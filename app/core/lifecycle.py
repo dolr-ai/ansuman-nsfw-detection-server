@@ -1,13 +1,17 @@
 from collections.abc import Callable
 from pathlib import Path
 
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
 from app.clients.gpu_openai import GpuOpenAIClient
 from app.clients.kvrocks import create_kvrocks_client
+from app.clients.postgres import create_postgres_engine
 from app.config.settings import Settings
 from app.repositories.kvrocks.queue_repository import InMemoryVideoQueueRepository, RedisVideoQueueRepository
 from app.services.auth_service import AuthService
 from app.services.gpu_moderation_service import GpuModerationService
 from app.services.queue_service import QueueService
+from app.services.video_status_service import PostgresVideoResultReader, VideoResultReader, VideoStatusService
 
 
 def build_auth_service(settings: Settings) -> AuthService:
@@ -21,6 +25,21 @@ def build_queue_service(settings: Settings) -> QueueService:
     else:
         queue_repository = InMemoryVideoQueueRepository()
     return QueueService(queue_repository=queue_repository)
+
+
+def build_video_status_service(
+    settings: Settings,
+    *,
+    queue_service: QueueService,
+    result_reader: VideoResultReader | None = None,
+    use_postgres_reader: bool = True,
+) -> VideoStatusService:
+    resolved_result_reader = result_reader
+    if resolved_result_reader is None and use_postgres_reader and settings.is_postgres_configured():
+        engine = create_postgres_engine(settings)
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        resolved_result_reader = PostgresVideoResultReader(session_factory)
+    return VideoStatusService(queue_service=queue_service, result_reader=resolved_result_reader)
 
 
 def build_gpu_moderation_service(settings: Settings) -> GpuModerationService | None:
