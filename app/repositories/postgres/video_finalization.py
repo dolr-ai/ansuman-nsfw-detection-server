@@ -16,6 +16,9 @@ from app.repositories.postgres.video_result_repository import VideoResultReposit
 
 
 class VideoJobStateRepository(Protocol):
+    async def get_by_job_id(self, job_id: str) -> VideoJob | None:
+        ...
+
     async def mark_processing(self, job: VideoJob) -> None:
         ...
 
@@ -33,6 +36,10 @@ class VideoJobStateRepository(Protocol):
 class PostgresVideoJobStateRepository:
     def __init__(self, session_factory) -> None:  # type: ignore[no-untyped-def]
         self._session_factory = session_factory
+
+    async def get_by_job_id(self, job_id: str) -> VideoJob | None:
+        async with self._session_factory() as session:
+            return await VideoJobRepository(session).get_by_job_id(job_id)
 
     async def mark_processing(self, job: VideoJob) -> None:
         async with self._session_factory() as session:
