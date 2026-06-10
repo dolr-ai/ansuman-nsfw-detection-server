@@ -95,6 +95,10 @@ class Settings(BaseSettings):
 
     queue_stream_name: str = "nsfw:queue:video_detection"
     queue_group_name: str = "nsfw_video_workers"
+    queue_consumer_name: str | None = Field(default=None, alias="QUEUE_CONSUMER_NAME")
+    queue_read_count: int = Field(default=1, alias="QUEUE_READ_COUNT")
+    queue_block_ms: int = Field(default=5000, alias="QUEUE_BLOCK_MS")
+    queue_max_attempts: int = Field(default=3, alias="QUEUE_MAX_ATTEMPTS")
     queue_dlq_stream_name: str = "nsfw:queue:video_detection:dlq"
     clickhouse_buffer_video_results_key: str = "nsfw:clickhouse_buffer:video_results"
     clickhouse_buffer_legacy_key: str = "nsfw:clickhouse_buffer:legacy_nsfw_agg"
