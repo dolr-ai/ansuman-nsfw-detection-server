@@ -42,9 +42,14 @@ def create_app(
     resolved_settings = settings or Settings()
 
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(lifespan_app: FastAPI) -> AsyncIterator[None]:
         init_sentry(resolved_settings)
-        yield
+        try:
+            yield
+        finally:
+            queue_service = getattr(lifespan_app.state, "queue_service", None)
+            if queue_service is not None:
+                await queue_service.aclose()
 
     app = FastAPI(title=resolved_settings.app_name, lifespan=lifespan)
 

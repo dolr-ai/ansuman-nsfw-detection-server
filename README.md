@@ -73,6 +73,15 @@ KVRocks/Redis is used for durable video enqueue when KVRocks env vars are
 configured. It is not used for HMAC nonce storage. Tests use in-memory
 repositories through the same interfaces.
 
+Useful KVRocks/Redis pool knobs:
+
+```text
+KVROCKS_MAX_CONNECTIONS=500
+KVROCKS_SOCKET_TIMEOUT_SECONDS=5
+KVROCKS_SOCKET_CONNECT_TIMEOUT_SECONDS=5
+KVROCKS_HEALTH_CHECK_INTERVAL_SECONDS=30
+```
+
 ## Legacy
 
 The previous gRPC service and old GCS/BigQuery pipeline are not part of the new

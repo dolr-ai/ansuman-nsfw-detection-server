@@ -66,3 +66,6 @@ class QueueService:
             error_code=error_code,
             error_message=error_message,
         )
+
+    async def aclose(self) -> None:
+        await self._queue_repository.aclose()

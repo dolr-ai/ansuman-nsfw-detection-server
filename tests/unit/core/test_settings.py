@@ -20,3 +20,18 @@ def test_settings_repr_redacts_secrets() -> None:
 
     assert "secret-value" not in rendered
     assert "gpu-secret" not in rendered
+
+
+def test_settings_reads_kvrocks_pool_options() -> None:
+    settings = Settings(
+        _env_file=None,
+        KVROCKS_MAX_CONNECTIONS=750,
+        KVROCKS_SOCKET_TIMEOUT_SECONDS=3.5,
+        KVROCKS_SOCKET_CONNECT_TIMEOUT_SECONDS=1.5,
+        KVROCKS_HEALTH_CHECK_INTERVAL_SECONDS=10,
+    )
+
+    assert settings.kvrocks_max_connections == 750
+    assert settings.kvrocks_socket_timeout_seconds == 3.5
+    assert settings.kvrocks_socket_connect_timeout_seconds == 1.5
+    assert settings.kvrocks_health_check_interval_seconds == 10
