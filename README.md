@@ -43,6 +43,16 @@ Video status:
 GET /v1/videos/{video_id}/status
 ```
 
+Manual human-approved ban:
+
+```text
+POST /v1/videos/{video_id}/ban
+```
+
+`/v1/videos/{video_id}/ban` writes `yral.excluded_videos` and the legacy
+`yral.video_nsfw_agg` compatibility row synchronously. It does not enqueue video
+processing and does not write classifier rows to `yral.video_nsfw_detection`.
+
 All `/v1` endpoints require internal HMAC headers:
 
 ```text
@@ -72,6 +82,13 @@ Configure the shared secret with `INTERNAL_REQUEST_HMAC_SECRET`.
 KVRocks/Redis is used for durable video enqueue when KVRocks env vars are
 configured. It is not used for HMAC nonce storage. Tests use in-memory
 repositories through the same interfaces.
+
+Manual ban writes use these ClickHouse table env vars:
+
+```text
+CLICKHOUSE_EXCLUDED_VIDEOS_TABLE=excluded_videos
+CLICKHOUSE_NSFW_AGG_TABLE=video_nsfw_agg
+```
 
 ## Legacy
 

@@ -1,7 +1,8 @@
 from datetime import UTC, datetime
 
+from app.repositories.clickhouse.excluded_videos_repository import ClickHouseExcludedVideosRepository
 from app.repositories.clickhouse.video_result_repository import ClickHouseVideoResultRepository
-from app.schemas.clickhouse import VideoNsfwDetectionRow
+from app.schemas.clickhouse import ExcludedVideoRow, VideoNsfwDetectionRow
 
 
 class FakeClickHouseClient:
@@ -74,5 +75,29 @@ def test_clickhouse_insert_uses_column_names_and_replacing_column() -> None:
     assert table_name == "yral.video_nsfw_detection"
     assert "_updated_at" in columns
     assert "updated_at_replacing" not in columns
+    assert len(data) == 1
+    assert len(data[0]) == len(columns)
+
+
+def test_excluded_video_insert_uses_replacing_column() -> None:
+    now = datetime.now(UTC)
+    client = FakeClickHouseClient()
+    repo = ClickHouseExcludedVideosRepository(client, "yral")
+
+    repo.insert_rows(
+        "excluded_videos",
+        [
+            ExcludedVideoRow(
+                video_id="video",
+                excluded_at=now,
+                exclusion_reason="banned",
+                updated_at_replacing=now,
+            )
+        ],
+    )
+
+    table_name, data, columns = client.calls[0]
+    assert table_name == "yral.excluded_videos"
+    assert columns == ["video_id", "excluded_at", "exclusion_reason", "_updated_at"]
     assert len(data) == 1
     assert len(data[0]) == len(columns)
