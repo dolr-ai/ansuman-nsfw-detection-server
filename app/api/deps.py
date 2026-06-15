@@ -3,9 +3,12 @@ from typing import Annotated
 from fastapi import Header, Request
 
 from app.config.settings import Settings
+from app.errors.base import AppError
+from app.errors.codes import SERVICE_UNAVAILABLE
 from app.schemas.auth import SignedRequestContext
 from app.services.auth_service import AuthService
 from app.services.image_detection_service import ImageDetectionService
+from app.services.manual_ban_service import ManualBanService
 from app.services.queue_service import QueueService
 from app.services.readiness_service import ReadinessService
 from app.services.text_detection_service import TextDetectionService
@@ -36,6 +39,17 @@ def get_video_status_service(request: Request) -> VideoStatusService:
     return request.app.state.video_status_service
 
 
+def get_manual_ban_service(request: Request) -> ManualBanService:
+    service = getattr(request.app.state, "manual_ban_service", None)
+    if service is None:
+        raise AppError(
+            SERVICE_UNAVAILABLE,
+            "manual ban service is not configured",
+            status_code=503,
+        )
+    return service
+
+
 async def require_signed_request(
     request: Request,
     x_internal_timestamp: Annotated[
@@ -43,8 +57,7 @@ async def require_signed_request(
         Header(
             alias="X-Internal-Timestamp",
             description=(
-                "Unix epoch seconds. The HMAC message is "
-                "`<timestamp>\\n<METHOD>\\n<path>\\n<SHA256(raw_body)>`."
+                "Unix epoch seconds. The HMAC message is `<timestamp>\\n<METHOD>\\n<path>\\n<SHA256(raw_body)>`."
             ),
         ),
     ],

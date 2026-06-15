@@ -119,3 +119,51 @@ class VideoStatusResponse(BaseModel):
     last_error_code: str | None = None
     last_error_message: str | None = None
     final_result: VideoFinalResultResponse | None = None
+
+
+class VideoBanRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "publisher_user_id": "principal-or-user-id",
+                    "post_id": "post-id",
+                    "canister_id": "canister-id",
+                    "reason": "user_report_approved",
+                    "source": "google_chat",
+                    "moderator_id": None,
+                    "trace_id": "report-approved:canister-id:post-id",
+                }
+            ]
+        }
+    )
+
+    publisher_user_id: str = Field(min_length=1)
+    post_id: str = Field(min_length=1)
+    canister_id: str = Field(min_length=1)
+    reason: str = Field(default="user_report_approved", min_length=1)
+    source: str = Field(default="google_chat", min_length=1)
+    moderator_id: str | None = None
+    trace_id: str | None = None
+
+
+class VideoBanResponse(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "video_id": "video-id",
+                    "status": "banned",
+                    "excluded_videos_written": True,
+                    "legacy_nsfw_agg_written": True,
+                    "trace_id": "report-approved:canister-id:post-id",
+                }
+            ]
+        }
+    )
+
+    video_id: str
+    status: str
+    excluded_videos_written: bool
+    legacy_nsfw_agg_written: bool
+    trace_id: str | None = None
