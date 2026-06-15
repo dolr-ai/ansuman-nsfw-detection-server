@@ -3,13 +3,17 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from app.clients.clickhouse import create_clickhouse_client
 from app.clients.gpu_openai import GpuOpenAIClient
 from app.clients.kvrocks import create_kvrocks_client
 from app.clients.postgres import create_postgres_engine
 from app.config.settings import Settings
+from app.repositories.clickhouse.excluded_videos_repository import ClickHouseExcludedVideosRepository
+from app.repositories.clickhouse.legacy_nsfw_agg_repository import ClickHouseLegacyNsfwAggRepository
 from app.repositories.kvrocks.queue_repository import InMemoryVideoQueueRepository, RedisVideoQueueRepository
 from app.services.auth_service import AuthService
 from app.services.gpu_moderation_service import GpuModerationService
+from app.services.manual_ban_service import ManualBanService
 from app.services.queue_service import QueueService
 from app.services.video_status_service import PostgresVideoResultReader, VideoResultReader, VideoStatusService
 
@@ -40,6 +44,17 @@ def build_video_status_service(
         session_factory = async_sessionmaker(engine, expire_on_commit=False)
         resolved_result_reader = PostgresVideoResultReader(session_factory)
     return VideoStatusService(queue_service=queue_service, result_reader=resolved_result_reader)
+
+
+def build_manual_ban_service(settings: Settings) -> ManualBanService | None:
+    if not settings.is_clickhouse_configured():
+        return None
+    clickhouse_client = create_clickhouse_client(settings)
+    return ManualBanService(
+        settings=settings,
+        excluded_videos_repository=ClickHouseExcludedVideosRepository(clickhouse_client, settings.clickhouse_database),
+        legacy_repository=ClickHouseLegacyNsfwAggRepository(clickhouse_client, settings.clickhouse_database),
+    )
 
 
 def build_gpu_moderation_service(settings: Settings) -> GpuModerationService | None:

@@ -50,3 +50,9 @@ class VideoNsfwDetectionRow(BaseModel):
     updated_at: datetime
     updated_at_replacing: datetime
 
+
+class ExcludedVideoRow(BaseModel):
+    video_id: str
+    excluded_at: datetime
+    exclusion_reason: str
+    updated_at_replacing: datetime

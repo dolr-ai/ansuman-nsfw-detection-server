@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     clickhouse_password: SecretStr | None = Field(default=None, repr=False, alias="CLICKHOUSE_PASSWORD")
     clickhouse_nsfw_table: str = Field(default="video_nsfw_detection", alias="CLICKHOUSE_NSFW_TABLE")
     clickhouse_nsfw_agg_table: str = Field(default="video_nsfw_agg", alias="CLICKHOUSE_NSFW_AGG_TABLE")
+    clickhouse_excluded_videos_table: str = Field(default="excluded_videos", alias="CLICKHOUSE_EXCLUDED_VIDEOS_TABLE")
     clickhouse_storage_actions_table: str = "video_nsfw_storage_actions"
 
     storj_interface_url: str | None = Field(default=None, alias="STORJ_INTERFACE_URL")

@@ -43,6 +43,16 @@ Video status:
 GET /v1/videos/{video_id}/status
 ```
 
+Manual human-approved ban:
+
+```text
+POST /v1/videos/{video_id}/ban
+```
+
+`/v1/videos/{video_id}/ban` writes `yral.excluded_videos` and the legacy
+`yral.video_nsfw_agg` compatibility row synchronously. It does not enqueue video
+processing and does not write classifier rows to `yral.video_nsfw_detection`.
+
 All `/v1` endpoints require internal HMAC headers:
 
 ```text
@@ -80,6 +90,13 @@ KVROCKS_MAX_CONNECTIONS=500
 KVROCKS_SOCKET_TIMEOUT_SECONDS=5
 KVROCKS_SOCKET_CONNECT_TIMEOUT_SECONDS=5
 KVROCKS_HEALTH_CHECK_INTERVAL_SECONDS=30
+```
+
+Manual ban writes use these ClickHouse table env vars:
+
+```text
+CLICKHOUSE_EXCLUDED_VIDEOS_TABLE=excluded_videos
+CLICKHOUSE_NSFW_AGG_TABLE=video_nsfw_agg
 ```
 
 ## Legacy

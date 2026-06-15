@@ -12,6 +12,7 @@ from app.config.settings import Settings
 from app.core.lifecycle import (
     build_auth_service,
     build_gpu_moderation_service,
+    build_manual_ban_service,
     build_queue_service,
     build_video_status_service,
 )
@@ -26,6 +27,7 @@ from app.errors.http import (
 from app.middleware.request_id import RequestIdMiddleware
 from app.repositories.kvrocks.queue_repository import VideoQueueRepository
 from app.services.image_detection_service import ImageDetectionService
+from app.services.manual_ban_service import ManualBanService
 from app.services.queue_service import QueueService
 from app.services.readiness_service import ReadinessService
 from app.services.text_detection_service import TextDetectionService
@@ -37,6 +39,7 @@ def create_app(
     settings: Settings | None = None,
     queue_repository: VideoQueueRepository | None = None,
     video_result_reader: VideoResultReader | None = None,
+    manual_ban_service: ManualBanService | None = None,
 ) -> FastAPI:
     configure_logging()
     resolved_settings = settings or Settings()
@@ -72,6 +75,9 @@ def create_app(
         result_reader=video_result_reader,
         use_postgres_reader=queue_repository is None,
     )
+    app.state.manual_ban_service = manual_ban_service
+    if app.state.manual_ban_service is None and queue_repository is None:
+        app.state.manual_ban_service = build_manual_ban_service(resolved_settings)
 
     app.state.readiness_service = ReadinessService(resolved_settings)
     gpu_service = build_gpu_moderation_service(resolved_settings)
