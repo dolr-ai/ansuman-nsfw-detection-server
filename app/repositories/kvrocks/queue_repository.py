@@ -73,6 +73,9 @@ class VideoQueueRepository(Protocol):
     ) -> None:
         ...
 
+    async def aclose(self) -> None:
+        ...
+
 
 class InMemoryVideoQueueRepository:
     def __init__(self) -> None:
@@ -209,6 +212,9 @@ class InMemoryVideoQueueRepository:
         )
         await self.ack_video_job_message(message.message_id)
 
+    async def aclose(self) -> None:
+        return None
+
 
 class RedisVideoQueueRepository:
     def __init__(self, redis_client: Redis, settings: Settings) -> None:
@@ -219,13 +225,16 @@ class RedisVideoQueueRepository:
         job_key = self._job_key(request.job_id)
         existing = await self._redis.hgetall(job_key)
         if existing:
-            return EnqueueResult(job=_job_from_mapping(existing), enqueued=False)
+            existing_job = _job_from_mapping(existing)
+            await self._redis.set(self._video_id_key(existing_job.video_id), existing_job.job_id, nx=True)
+            return EnqueueResult(job=existing_job, enqueued=False)
 
         unique_key = self._unique_key(request.video_id, request.source_object_version, request.policy_version)
         existing_job_id = await self._redis.get(unique_key)
         if existing_job_id:
             existing = await self.get_job_by_id(existing_job_id)
             if existing is not None:
+                await self._redis.set(self._video_id_key(existing.video_id), existing.job_id, nx=True)
                 return EnqueueResult(job=existing, enqueued=False)
 
         now = datetime.now(UTC)
@@ -245,9 +254,11 @@ class RedisVideoQueueRepository:
             updated_at=now,
         )
         payload = _job_to_mapping(job)
+        video_id_key = self._video_id_key(job.video_id)
         if isinstance(self._redis, RedisCluster):
             await self._redis.hset(job_key, mapping=payload)
             await self._redis.set(unique_key, job.job_id)
+            await self._redis.set(video_id_key, job.job_id)
             await self._redis.xadd(
                 self._settings.queue_stream_name,
                 {"job_id": job.job_id, "payload": json.dumps(payload)},
@@ -256,6 +267,7 @@ class RedisVideoQueueRepository:
             async with self._redis.pipeline(transaction=True) as pipe:
                 await pipe.hset(job_key, mapping=payload)
                 await pipe.set(unique_key, job.job_id)
+                await pipe.set(video_id_key, job.job_id)
                 await pipe.xadd(
                     self._settings.queue_stream_name,
                     {"job_id": job.job_id, "payload": json.dumps(payload)},
@@ -264,13 +276,10 @@ class RedisVideoQueueRepository:
         return EnqueueResult(job=job, enqueued=True)
 
     async def get_job_by_video_id(self, video_id: str) -> VideoJob | None:
-        # Runtime status lookup by video_id is primarily served from PostgreSQL once Phase 3 lands.
-        # For queue-only Phase 2, scan the stream-backed job keys conservatively.
-        async for key in self._redis.scan_iter("nsfw:video_job:*"):
-            data = await self._redis.hgetall(key)
-            if data.get("video_id") == video_id:
-                return _job_from_mapping(data)
-        return None
+        job_id = await self._redis.get(self._video_id_key(video_id))
+        if not job_id:
+            return None
+        return await self.get_job_by_id(job_id)
 
     async def get_job_by_id(self, job_id: str) -> VideoJob | None:
         data = await self._redis.hgetall(self._job_key(job_id))
@@ -377,8 +386,10 @@ class RedisVideoQueueRepository:
         try:
             return await connection.read_response()
         finally:
-            await target_node.disconnect_if_needed(connection)
-            target_node.release(connection)
+            try:
+                await target_node.disconnect_if_needed(connection)
+            finally:
+                target_node.release(connection)
 
     async def ack_video_job_message(self, message_id: str) -> None:
         await self._redis.xack(
@@ -416,6 +427,9 @@ class RedisVideoQueueRepository:
         )
         await self.ack_video_job_message(message.message_id)
 
+    async def aclose(self) -> None:
+        await self._redis.aclose()
+
     @staticmethod
     def _job_key(job_id: str) -> str:
         return f"nsfw:video_job:{job_id}"
@@ -423,6 +437,10 @@ class RedisVideoQueueRepository:
     @staticmethod
     def _unique_key(video_id: str, source_object_version: str, policy_version: str) -> str:
         return f"nsfw:video_job_unique:{video_id}:{source_object_version}:{policy_version}"
+
+    @staticmethod
+    def _video_id_key(video_id: str) -> str:
+        return f"nsfw:video_job_by_video_id:{video_id}"
 
 
 def _json_payload(payload: dict[str, str]) -> dict[str, str]:

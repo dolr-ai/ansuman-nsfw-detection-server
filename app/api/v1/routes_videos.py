@@ -1,10 +1,13 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import MaxConnectionsError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from app.api.deps import get_manual_ban_service, get_queue_service, get_video_status_service
 from app.errors.base import AppError
-from app.errors.codes import NOT_FOUND
+from app.errors.codes import NOT_FOUND, QUEUE_UNAVAILABLE
 from app.schemas.video import (
     VideoBanRequest,
     VideoBanResponse,
@@ -20,6 +23,7 @@ router = APIRouter(prefix="/videos", tags=["videos"])
 QueueServiceDep = Annotated[QueueService, Depends(get_queue_service)]
 VideoStatusServiceDep = Annotated[VideoStatusService, Depends(get_video_status_service)]
 ManualBanServiceDep = Annotated[ManualBanService, Depends(get_manual_ban_service)]
+QUEUE_UNAVAILABLE_MESSAGE = "queue storage is temporarily unavailable"
 
 
 @router.post(
@@ -39,7 +43,10 @@ async def detect_video(
     request: VideoDetectRequest,
     queue_service: QueueServiceDep,
 ) -> VideoDetectResponse:
-    result = await queue_service.enqueue_video_detection(request)
+    try:
+        result = await queue_service.enqueue_video_detection(request)
+    except (MaxConnectionsError, RedisConnectionError, RedisTimeoutError) as exc:
+        raise _queue_unavailable_error() from exc
     return VideoDetectResponse(
         job_id=result.job.job_id,
         video_id=result.job.video_id,
@@ -61,7 +68,10 @@ async def video_status(
     video_id: str,
     video_status_service: VideoStatusServiceDep,
 ) -> VideoStatusResponse:
-    response = await video_status_service.get_status_by_video_id(video_id)
+    try:
+        response = await video_status_service.get_status_by_video_id(video_id)
+    except (MaxConnectionsError, RedisConnectionError, RedisTimeoutError) as exc:
+        raise _queue_unavailable_error() from exc
     if response is None:
         raise AppError(NOT_FOUND, "video job not found", status_code=404)
     return response
@@ -90,4 +100,12 @@ async def ban_video(
         excluded_videos_written=result.excluded_videos_written,
         legacy_nsfw_agg_written=result.legacy_nsfw_agg_written,
         trace_id=result.trace_id,
+    )
+
+
+def _queue_unavailable_error() -> AppError:
+    return AppError(
+        QUEUE_UNAVAILABLE,
+        QUEUE_UNAVAILABLE_MESSAGE,
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
     )

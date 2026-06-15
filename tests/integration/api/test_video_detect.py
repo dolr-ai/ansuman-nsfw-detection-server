@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from redis.exceptions import MaxConnectionsError
 
 from app.core.constants import VideoJobStatus
 from app.main import create_app
@@ -59,6 +60,17 @@ class FakeResultReader:
     async def get_latest_by_video_id(self, video_id: str) -> VideoModerationResult | None:
         assert video_id == "video-1"
         return final_result()
+
+
+class ExhaustedQueueRepository:
+    async def enqueue_video_job(self, request):  # type: ignore[no-untyped-def]
+        raise MaxConnectionsError("Too many connections")
+
+    async def get_job_by_video_id(self, video_id: str):  # type: ignore[no-untyped-def]
+        raise MaxConnectionsError("Too many connections")
+
+    async def aclose(self) -> None:
+        return None
 
 
 @pytest.mark.asyncio
@@ -139,6 +151,37 @@ async def test_status_endpoint_returns_queued_status(test_settings) -> None:  # 
 
     assert response.status_code == 200
     assert response.json()["status"] == "queued"
+
+
+@pytest.mark.asyncio
+async def test_video_detect_returns_503_when_queue_pool_is_exhausted(test_settings) -> None:  # type: ignore[no-untyped-def]
+    app = create_app(
+        settings=test_settings,
+        queue_repository=ExhaustedQueueRepository(),
+    )
+    body = video_body()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        raw_body, headers = signed_headers(method="POST", path="/v1/videos/detect", body=body)
+        response = await client.post("/v1/videos/detect", content=raw_body, headers=headers)
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "queue_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_status_endpoint_returns_503_when_queue_pool_is_exhausted(test_settings) -> None:  # type: ignore[no-untyped-def]
+    app = create_app(
+        settings=test_settings,
+        queue_repository=ExhaustedQueueRepository(),
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        raw_body, headers = signed_headers(method="GET", path="/v1/videos/video-1/status", body=None)
+        response = await client.request("GET", "/v1/videos/video-1/status", content=raw_body, headers=headers)
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "queue_unavailable"
 
 
 @pytest.mark.asyncio

@@ -24,6 +24,10 @@ def create_kvrocks_client(settings: Settings) -> Redis | RedisCluster:
         ssl_certfile=ssl_certfile,
         ssl_keyfile=ssl_keyfile,
         decode_responses=True,
+        max_connections=settings.kvrocks_max_connections,
+        socket_timeout=settings.kvrocks_socket_timeout_seconds,
+        socket_connect_timeout=settings.kvrocks_socket_connect_timeout_seconds,
+        health_check_interval=settings.kvrocks_health_check_interval_seconds,
     )
 
 
