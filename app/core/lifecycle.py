@@ -1,6 +1,8 @@
+import logging
 from collections.abc import Callable
 from pathlib import Path
 
+from clickhouse_connect.driver.exceptions import ClickHouseError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.clients.clickhouse import create_clickhouse_client
@@ -16,6 +18,8 @@ from app.services.gpu_moderation_service import GpuModerationService
 from app.services.manual_ban_service import ManualBanService
 from app.services.queue_service import QueueService
 from app.services.video_status_service import PostgresVideoResultReader, VideoResultReader, VideoStatusService
+
+logger = logging.getLogger(__name__)
 
 
 def build_auth_service(settings: Settings) -> AuthService:
@@ -49,7 +53,11 @@ def build_video_status_service(
 def build_manual_ban_service(settings: Settings) -> ManualBanService | None:
     if not settings.is_clickhouse_configured():
         return None
-    clickhouse_client = create_clickhouse_client(settings)
+    try:
+        clickhouse_client = create_clickhouse_client(settings)
+    except ClickHouseError:
+        logger.exception("manual ban service disabled because ClickHouse client initialization failed")
+        return None
     return ManualBanService(
         settings=settings,
         excluded_videos_repository=ClickHouseExcludedVideosRepository(clickhouse_client, settings.clickhouse_database),
