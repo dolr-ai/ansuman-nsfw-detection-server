@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.core.sentry import capture_exception
 from app.errors import codes
 from app.errors.base import AppError
 
@@ -43,4 +44,22 @@ async def request_validation_error_handler(_: Request, exc: RequestValidationErr
     return JSONResponse(
         status_code=422,
         content={"error": {"code": codes.VALIDATION_ERROR, "message": str(exc)}},
+    )
+
+
+async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    capture_exception(
+        exc,
+        tags={
+            "component": "api",
+            "operation": "unhandled_exception",
+        },
+        context={
+            "method": request.method,
+            "path": request.url.path,
+        },
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"error": {"code": codes.SERVICE_UNAVAILABLE, "message": "internal server error"}},
     )

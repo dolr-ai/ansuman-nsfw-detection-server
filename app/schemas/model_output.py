@@ -3,8 +3,8 @@ import json
 from pydantic import BaseModel, Field, ValidationError, computed_field, field_validator, model_validator
 
 from app.core.constants import MODERATION_CATEGORIES
+from app.errors import codes
 from app.errors.base import AppError
-from app.errors.codes import VALIDATION_ERROR
 from app.schemas.moderation import ModerationCategory, validate_category_scores
 from app.services.moderation_policy import compute_is_nsfw, compute_overall_severity
 
@@ -58,21 +58,33 @@ def parse_visual_batch_response(raw_response: str, expected_count: int) -> list[
     try:
         payload = json.loads(raw_response)
     except json.JSONDecodeError as exc:
-        raise AppError(VALIDATION_ERROR, "model response was not valid JSON") from exc
+        raise AppError(codes.MODEL_RESPONSE_INVALID_JSON, "model response was not valid JSON", status_code=502) from exc
 
     if not isinstance(payload, list):
-        raise AppError(VALIDATION_ERROR, "model response must be a JSON array")
+        raise AppError(codes.MODEL_RESPONSE_INVALID_SCHEMA, "model response must be a JSON array", status_code=502)
     if len(payload) != expected_count:
-        raise AppError(VALIDATION_ERROR, "model response count did not match request count")
+        raise AppError(
+            codes.MODEL_RESPONSE_INVALID_SCHEMA,
+            "model response count did not match request count",
+            status_code=502,
+        )
 
     results: list[FrameModerationOutput] = []
     for index, item in enumerate(payload):
         try:
             parsed = FrameModerationOutput.model_validate(item)
         except ValidationError as exc:
-            raise AppError(VALIDATION_ERROR, f"invalid frame response at index {index}") from exc
+            raise AppError(
+                codes.MODEL_RESPONSE_INVALID_SCHEMA,
+                f"invalid frame response at index {index}",
+                status_code=502,
+            ) from exc
         if parsed.frame_index != index:
-            raise AppError(VALIDATION_ERROR, "frame_index did not match response order")
+            raise AppError(
+                codes.MODEL_RESPONSE_INVALID_SCHEMA,
+                "frame_index did not match response order",
+                status_code=502,
+            )
         results.append(parsed)
     return results
 
@@ -81,12 +93,20 @@ def parse_text_moderation_response(raw_response: str) -> TextModerationOutput:
     try:
         payload = json.loads(raw_response)
     except json.JSONDecodeError as exc:
-        raise AppError(VALIDATION_ERROR, "model response was not valid JSON") from exc
+        raise AppError(codes.MODEL_RESPONSE_INVALID_JSON, "model response was not valid JSON", status_code=502) from exc
 
     if not isinstance(payload, dict):
-        raise AppError(VALIDATION_ERROR, "text model response must be a JSON object")
+        raise AppError(
+            codes.MODEL_RESPONSE_INVALID_SCHEMA,
+            "text model response must be a JSON object",
+            status_code=502,
+        )
 
     try:
         return TextModerationOutput.model_validate(payload)
     except ValidationError as exc:
-        raise AppError(VALIDATION_ERROR, "invalid text moderation response") from exc
+        raise AppError(
+            codes.MODEL_RESPONSE_INVALID_SCHEMA,
+            "invalid text moderation response",
+            status_code=502,
+        ) from exc

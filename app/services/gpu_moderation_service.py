@@ -3,6 +3,9 @@ from pathlib import Path
 from typing import Protocol
 
 from app.config.settings import Settings
+from app.core.sentry import capture_exception
+from app.errors import codes
+from app.errors.base import AppError
 from app.models.frame_result import FrameModerationResult
 from app.schemas.model_output import (
     FrameModerationOutput,
@@ -50,9 +53,10 @@ class GpuModerationService:
         if len(frames) > self._settings.frame_batch_size:
             raise ValueError("frame batch is larger than configured batch size")
 
+        max_attempts = _max_attempts(self._settings.gpu_max_attempts)
         last_error: Exception | None = None
         image_paths = [frame.path for frame in frames]
-        for _ in range(self._settings.gpu_max_attempts):
+        for attempt in range(1, max_attempts + 1):
             try:
                 async with self._semaphore:
                     raw_response = await self._visual_client.moderate_images(
@@ -66,8 +70,19 @@ class GpuModerationService:
                 ]
             except Exception as exc:
                 last_error = exc
+                _capture_model_attempt_failure(
+                    exc,
+                    operation="visual_batch",
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                )
+                await _sleep_before_retry(
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    base_delay_seconds=self._settings.gpu_retry_base_delay_seconds,
+                )
         if last_error is not None:
-            raise last_error
+            _raise_model_failure(last_error)
         raise RuntimeError("GPU moderation failed without an exception")
 
     async def moderate_image_generation(
@@ -85,8 +100,9 @@ class GpuModerationService:
                 raise RuntimeError("image+prompt moderation prompt is not configured")
             prompt = _append_generation_prompt(self._image_text_prompt, generation_prompt)
 
+        max_attempts = _max_attempts(self._settings.gpu_max_attempts)
         last_error: Exception | None = None
-        for _ in range(self._settings.gpu_max_attempts):
+        for attempt in range(1, max_attempts + 1):
             try:
                 async with self._semaphore:
                     raw_response = await self._visual_client.moderate_images(
@@ -97,24 +113,47 @@ class GpuModerationService:
                 return _to_frame_moderation_result(source_frame=frame, model_output=parsed[0])
             except Exception as exc:
                 last_error = exc
+                _capture_model_attempt_failure(
+                    exc,
+                    operation="image_generation",
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                )
+                await _sleep_before_retry(
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    base_delay_seconds=self._settings.gpu_retry_base_delay_seconds,
+                )
         if last_error is not None:
-            raise last_error
+            _raise_model_failure(last_error)
         raise RuntimeError("image moderation failed without an exception")
 
     async def moderate_text(self, text: str) -> TextModerationOutput:
         if self._text_client is None or self._text_prompt is None:
             raise RuntimeError("text moderation client is not configured")
 
+        max_attempts = _max_attempts(self._settings.gpu_max_attempts)
         last_error: Exception | None = None
-        for _ in range(self._settings.gpu_max_attempts):
+        for attempt in range(1, max_attempts + 1):
             try:
                 async with self._semaphore:
                     raw_response = await self._text_client.moderate_text(prompt=self._text_prompt, text=text)
                 return parse_text_moderation_response(raw_response)
             except Exception as exc:
                 last_error = exc
+                _capture_model_attempt_failure(
+                    exc,
+                    operation="text",
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                )
+                await _sleep_before_retry(
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    base_delay_seconds=self._settings.gpu_retry_base_delay_seconds,
+                )
         if last_error is not None:
-            raise last_error
+            _raise_model_failure(last_error)
         raise RuntimeError("text moderation failed without an exception")
 
 
@@ -146,3 +185,55 @@ def _append_generation_prompt(prompt_template: str, generation_prompt: str) -> s
             "<<<END_GENERATION_PROMPT>>>",
         ]
     )
+
+
+def _max_attempts(value: int) -> int:
+    return max(1, value)
+
+
+async def _sleep_before_retry(*, attempt: int, max_attempts: int, base_delay_seconds: float) -> None:
+    if attempt >= max_attempts or base_delay_seconds <= 0:
+        return
+    await asyncio.sleep(min(base_delay_seconds * (2 ** (attempt - 1)), 2.0))
+
+
+def _capture_model_attempt_failure(
+    exc: Exception,
+    *,
+    operation: str,
+    attempt: int,
+    max_attempts: int,
+) -> None:
+    capture_exception(
+        exc,
+        tags={
+            "component": "gpu_moderation",
+            "operation": operation,
+            "error_code": _error_code(exc),
+            "retry_remaining": str(attempt < max_attempts).lower(),
+        },
+        context={
+            "attempt": attempt,
+            "max_attempts": max_attempts,
+            "error_type": exc.__class__.__name__,
+            "error_message": _error_message(exc),
+        },
+    )
+
+
+def _raise_model_failure(last_error: Exception) -> None:
+    if isinstance(last_error, AppError):
+        raise last_error
+    raise AppError(
+        codes.MODEL_MODERATION_FAILED,
+        "model moderation failed after retries",
+        status_code=503,
+    ) from last_error
+
+
+def _error_code(exc: Exception) -> str:
+    return exc.code if isinstance(exc, AppError) else exc.__class__.__name__
+
+
+def _error_message(exc: Exception) -> str:
+    return exc.message if isinstance(exc, AppError) else str(exc)

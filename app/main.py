@@ -22,6 +22,7 @@ from app.errors.http import (
     app_error_handler,
     http_error_handler,
     request_validation_error_handler,
+    unhandled_error_handler,
     validation_error_handler,
 )
 from app.middleware.request_id import RequestIdMiddleware
@@ -61,6 +62,7 @@ def create_app(
     app.add_exception_handler(StarletteHTTPException, http_error_handler)
     app.add_exception_handler(ValidationError, validation_error_handler)
     app.add_exception_handler(RequestValidationError, request_validation_error_handler)
+    app.add_exception_handler(Exception, unhandled_error_handler)
 
     app.state.settings = resolved_settings
     app.state.auth_service = build_auth_service(resolved_settings)

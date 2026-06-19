@@ -1,11 +1,15 @@
+import asyncio
 import base64
 import binascii
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib.parse import urlsplit
 
 import httpx
 
 from app.config.settings import Settings
+from app.core.sentry import capture_exception
+from app.errors import codes
 from app.errors.base import AppError
 from app.models.frame_result import FrameModerationResult
 from app.schemas.moderation import ModerationDetectResponse
@@ -33,9 +37,7 @@ class ImageDetectionService:
         owns_client = self._http_client is None
         client = self._http_client or httpx.AsyncClient(follow_redirects=True)
         try:
-            response = await client.get(image_url, timeout=self._settings.video_download_timeout_seconds)
-            response.raise_for_status()
-            image_bytes = response.content
+            image_bytes = await self._download_image_with_retries(client, image_url)
         finally:
             if owns_client:
                 await client.aclose()
@@ -65,6 +67,80 @@ class ImageDetectionService:
             )
         return _frame_to_detect_response(result)
 
+    async def _download_image_with_retries(self, client: httpx.AsyncClient, image_url: str) -> bytes:
+        max_attempts = max(1, self._settings.image_download_max_attempts)
+        last_error: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await client.get(image_url, timeout=self._settings.image_download_timeout_seconds)
+                response.raise_for_status()
+                return response.content
+            except httpx.TimeoutException as exc:
+                last_error = exc
+                _capture_image_download_failure(
+                    exc,
+                    image_url=image_url,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    error_kind="timeout",
+                )
+                await _sleep_before_retry(
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    base_delay_seconds=self._settings.image_download_retry_base_delay_seconds,
+                )
+            except httpx.HTTPStatusError as exc:
+                last_error = exc
+                status_code = exc.response.status_code
+                _capture_image_download_failure(
+                    exc,
+                    image_url=image_url,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    error_kind="http_status",
+                    status_code=status_code,
+                )
+                if status_code < 500:
+                    raise AppError(
+                        codes.IMAGE_DOWNLOAD_FAILED,
+                        "image_url could not be downloaded",
+                    ) from exc
+                await _sleep_before_retry(
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    base_delay_seconds=self._settings.image_download_retry_base_delay_seconds,
+                )
+            except httpx.RequestError as exc:
+                last_error = exc
+                _capture_image_download_failure(
+                    exc,
+                    image_url=image_url,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    error_kind="request_error",
+                )
+                await _sleep_before_retry(
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    base_delay_seconds=self._settings.image_download_retry_base_delay_seconds,
+                )
+
+        if isinstance(last_error, httpx.TimeoutException):
+            raise AppError(
+                codes.IMAGE_DOWNLOAD_TIMEOUT,
+                "image_url download timed out",
+                status_code=504,
+            ) from last_error
+        if isinstance(last_error, httpx.HTTPStatusError) and last_error.response.status_code >= 500:
+            raise AppError(
+                codes.IMAGE_DOWNLOAD_UPSTREAM_ERROR,
+                "image_url host returned an upstream error",
+                status_code=502,
+            ) from last_error
+        if last_error is not None:
+            raise AppError(codes.IMAGE_DOWNLOAD_FAILED, "image_url could not be downloaded") from last_error
+        raise AppError(codes.IMAGE_DOWNLOAD_FAILED, "image_url could not be downloaded")
+
 
 def _normalize_prompt(prompt: str | None) -> str | None:
     if prompt is None:
@@ -81,3 +157,45 @@ def _frame_to_detect_response(result: FrameModerationResult) -> ModerationDetect
         categories=result.categories,
         reason=result.reason,
     )
+
+
+async def _sleep_before_retry(*, attempt: int, max_attempts: int, base_delay_seconds: float) -> None:
+    if attempt >= max_attempts or base_delay_seconds <= 0:
+        return
+    await asyncio.sleep(min(base_delay_seconds * (2 ** (attempt - 1)), 2.0))
+
+
+def _capture_image_download_failure(
+    exc: Exception,
+    *,
+    image_url: str,
+    attempt: int,
+    max_attempts: int,
+    error_kind: str,
+    status_code: int | None = None,
+) -> None:
+    capture_exception(
+        exc,
+        tags={
+            "component": "image_detection",
+            "operation": "download_image_url",
+            "error_kind": error_kind,
+            "retry_remaining": str(attempt < max_attempts).lower(),
+        },
+        context={
+            "attempt": attempt,
+            "max_attempts": max_attempts,
+            "status_code": status_code,
+            **_safe_url_context(image_url),
+        },
+    )
+
+
+def _safe_url_context(image_url: str) -> dict[str, str | int | None]:
+    parsed = urlsplit(image_url)
+    return {
+        "url_scheme": parsed.scheme,
+        "url_host": parsed.hostname,
+        "url_path": parsed.path[:160],
+        "url_port": parsed.port,
+    }
