@@ -89,7 +89,14 @@ class Settings(BaseSettings):
     frame_batch_size: int = 5
     gpu_max_concurrency: int = 5
     gpu_max_attempts: int = 3
+    gpu_retry_base_delay_seconds: float = Field(default=0.25, alias="GPU_RETRY_BASE_DELAY_SECONDS")
     image_max_bytes: int = 10 * 1024 * 1024
+    image_download_timeout_seconds: float = Field(default=30.0, alias="IMAGE_DOWNLOAD_TIMEOUT_SECONDS")
+    image_download_max_attempts: int = Field(default=3, alias="IMAGE_DOWNLOAD_MAX_ATTEMPTS")
+    image_download_retry_base_delay_seconds: float = Field(
+        default=0.5,
+        alias="IMAGE_DOWNLOAD_RETRY_BASE_DELAY_SECONDS",
+    )
 
     video_download_timeout_seconds: float = 120.0
     video_max_bytes: int = 512 * 1024 * 1024
