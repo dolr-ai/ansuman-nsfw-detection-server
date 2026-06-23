@@ -9,7 +9,22 @@ from app.errors import codes
 from app.errors.base import AppError
 
 
-async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
+async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+    if exc.status_code >= 500:
+        capture_exception(
+            exc,
+            tags={
+                "component": "api",
+                "error_code": exc.code,
+                "http_status": str(exc.status_code),
+            },
+            context={
+                "method": request.method,
+                "path": request.url.path,
+                "error_code": exc.code,
+                "error_message": exc.message,
+            },
+        )
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": {"code": exc.code, "message": exc.message}},
