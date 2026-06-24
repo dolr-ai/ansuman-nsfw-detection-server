@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     kvrocks_tls_enabled: bool = Field(default=False, alias="KVROCKS_TLS_ENABLED")
     kvrocks_cluster_enabled: bool = Field(default=True, alias="KVROCKS_CLUSTER_ENABLED")
     kvrocks_max_connections: int = Field(default=500, alias="KVROCKS_MAX_CONNECTIONS")
+    kvrocks_pool_max_attempts: int = Field(default=3, alias="KVROCKS_POOL_MAX_ATTEMPTS")
+    kvrocks_pool_retry_base_delay_seconds: float = Field(
+        default=0.05,
+        alias="KVROCKS_POOL_RETRY_BASE_DELAY_SECONDS",
+    )
     kvrocks_socket_timeout_seconds: float = Field(default=5.0, alias="KVROCKS_SOCKET_TIMEOUT_SECONDS")
     kvrocks_socket_connect_timeout_seconds: float = Field(default=5.0, alias="KVROCKS_SOCKET_CONNECT_TIMEOUT_SECONDS")
     kvrocks_health_check_interval_seconds: int = Field(default=30, alias="KVROCKS_HEALTH_CHECK_INTERVAL_SECONDS")
