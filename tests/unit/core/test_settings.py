@@ -26,12 +26,16 @@ def test_settings_reads_kvrocks_pool_options() -> None:
     settings = Settings(
         _env_file=None,
         KVROCKS_MAX_CONNECTIONS=750,
+        KVROCKS_POOL_MAX_ATTEMPTS=4,
+        KVROCKS_POOL_RETRY_BASE_DELAY_SECONDS=0.1,
         KVROCKS_SOCKET_TIMEOUT_SECONDS=3.5,
         KVROCKS_SOCKET_CONNECT_TIMEOUT_SECONDS=1.5,
         KVROCKS_HEALTH_CHECK_INTERVAL_SECONDS=10,
     )
 
     assert settings.kvrocks_max_connections == 750
+    assert settings.kvrocks_pool_max_attempts == 4
+    assert settings.kvrocks_pool_retry_base_delay_seconds == 0.1
     assert settings.kvrocks_socket_timeout_seconds == 3.5
     assert settings.kvrocks_socket_connect_timeout_seconds == 1.5
     assert settings.kvrocks_health_check_interval_seconds == 10

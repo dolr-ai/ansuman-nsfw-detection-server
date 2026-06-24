@@ -32,7 +32,7 @@ def build_queue_service(settings: Settings) -> QueueService:
         queue_repository = RedisVideoQueueRepository(redis_client, settings=settings)
     else:
         queue_repository = InMemoryVideoQueueRepository()
-    return QueueService(queue_repository=queue_repository)
+    return QueueService(queue_repository=queue_repository, settings=settings)
 
 
 def build_video_status_service(

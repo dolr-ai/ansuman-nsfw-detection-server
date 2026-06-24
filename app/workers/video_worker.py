@@ -121,7 +121,10 @@ async def run() -> None:
         if gpu_service is None:
             raise RuntimeError("GPU moderation settings are required for the video worker")
 
-        queue_service = QueueService(RedisVideoQueueRepository(redis_client, settings=settings))
+        queue_service = QueueService(
+            RedisVideoQueueRepository(redis_client, settings=settings),
+            settings=settings,
+        )
         detection_service = VideoDetectionService(
             settings=settings,
             storage_move_service=StorageMoveService(StorjInterfaceClient(settings, http_client)),

@@ -1,21 +1,34 @@
+import asyncio
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
+
+from redis.exceptions import MaxConnectionsError
+
+from app.config.settings import Settings
 from app.core.constants import VideoJobStatus
 from app.models.video_job import VideoJob
 from app.repositories.kvrocks.queue_repository import EnqueueResult, QueuedVideoJobMessage, VideoQueueRepository
 from app.schemas.video import VideoDetectRequest
 
+T = TypeVar("T")
+
 
 class QueueService:
-    def __init__(self, queue_repository: VideoQueueRepository) -> None:
+    def __init__(self, queue_repository: VideoQueueRepository, *, settings: Settings | None = None) -> None:
         self._queue_repository = queue_repository
+        self._pool_max_attempts = max(1, settings.kvrocks_pool_max_attempts) if settings is not None else 1
+        self._pool_retry_base_delay_seconds = (
+            max(0.0, settings.kvrocks_pool_retry_base_delay_seconds) if settings is not None else 0.0
+        )
 
     async def enqueue_video_detection(self, request: VideoDetectRequest) -> EnqueueResult:
         return await self._queue_repository.enqueue_video_job(request)
 
     async def get_status_by_video_id(self, video_id: str) -> VideoJob | None:
-        return await self._queue_repository.get_job_by_video_id(video_id)
+        return await self._read_with_pool_retry(lambda: self._queue_repository.get_job_by_video_id(video_id))
 
     async def get_status_by_job_id(self, job_id: str) -> VideoJob | None:
-        return await self._queue_repository.get_job_by_id(job_id)
+        return await self._read_with_pool_retry(lambda: self._queue_repository.get_job_by_id(job_id))
 
     async def update_status(
         self,
@@ -69,3 +82,15 @@ class QueueService:
 
     async def aclose(self) -> None:
         await self._queue_repository.aclose()
+
+    async def _read_with_pool_retry(self, operation: Callable[[], Awaitable[T]]) -> T:
+        for attempt in range(1, self._pool_max_attempts + 1):
+            try:
+                return await operation()
+            except MaxConnectionsError:
+                if attempt >= self._pool_max_attempts:
+                    raise
+                delay = min(self._pool_retry_base_delay_seconds * (2 ** (attempt - 1)), 1.0)
+                if delay > 0:
+                    await asyncio.sleep(delay)
+        raise RuntimeError("queue pool retry loop exited unexpectedly")
