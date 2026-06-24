@@ -149,6 +149,25 @@ async def test_moderate_image_generation_uses_image_prompt(test_settings, tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_moderate_image_generation_accepts_fenced_json_without_retry(
+    test_settings, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
+    response = f"```json\n{json.dumps([model_frame(0)], indent=2)}\n```"
+    client = FakeVisualClient([response])
+    service = GpuModerationService(
+        settings=test_settings,
+        visual_client=client,
+        visual_prompt="visual",
+        image_prompt="image generation prompt",
+    )
+
+    result = await service.moderate_image_generation(frames(tmp_path, 1)[0])
+
+    assert result.top_category == "safe"
+    assert client.calls == 1
+
+
+@pytest.mark.asyncio
 async def test_moderate_image_generation_uses_joint_image_prompt(test_settings, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     client = FakeVisualClient([json.dumps([model_frame(0, top_category="porn", severity=4)])])
     service = GpuModerationService(
