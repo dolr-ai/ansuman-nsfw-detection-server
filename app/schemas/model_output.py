@@ -9,6 +9,7 @@ from app.schemas.moderation import ModerationCategory, validate_category_scores
 from app.services.moderation_policy import compute_is_nsfw, compute_overall_severity
 
 UNSAFE_MODEL_CATEGORIES = tuple(category for category in MODERATION_CATEGORIES if category != "safe")
+_MISSING_JSON = object()
 
 
 class ModerationModelOutput(BaseModel):
@@ -54,11 +55,64 @@ class TextModerationOutput(ModerationModelOutput):
     pass
 
 
-def parse_visual_batch_response(raw_response: str, expected_count: int) -> list[FrameModerationOutput]:
+def _load_model_json(raw_response: str) -> object:
+    candidate = raw_response.lstrip("\ufeff").strip()
     try:
-        payload = json.loads(raw_response)
+        return json.loads(candidate)
     except json.JSONDecodeError as exc:
-        raise AppError(codes.MODEL_RESPONSE_INVALID_JSON, "model response was not valid JSON", status_code=502) from exc
+        extracted = _extract_single_json_document(candidate)
+        if extracted is _MISSING_JSON:
+            raise AppError(
+                codes.MODEL_RESPONSE_INVALID_JSON,
+                "model response was not valid JSON",
+                status_code=502,
+            ) from exc
+        return extracted
+
+
+def _extract_single_json_document(raw_response: str) -> object:
+    start = _next_json_start(raw_response, 0)
+    if start is None:
+        return _MISSING_JSON
+
+    decoder = json.JSONDecoder()
+    try:
+        payload, end = decoder.raw_decode(raw_response, start)
+    except json.JSONDecodeError:
+        return _MISSING_JSON
+    if not isinstance(payload, (dict, list)):
+        return _MISSING_JSON
+
+    cursor = end
+    while (next_start := _next_json_start(raw_response, cursor)) is not None:
+        try:
+            extra_payload, extra_end = decoder.raw_decode(raw_response, next_start)
+        except json.JSONDecodeError:
+            cursor = next_start + 1
+            continue
+        if isinstance(extra_payload, (dict, list)):
+            return _MISSING_JSON
+        cursor = extra_end
+    return payload
+
+
+def _next_json_start(value: str, start: int) -> int | None:
+    positions = [position for token in ("{", "[") if (position := value.find(token, start)) >= 0]
+    return min(positions) if positions else None
+
+
+def _unwrap_envelope(payload: object, keys: tuple[str, ...]) -> object:
+    if not isinstance(payload, dict) or len(payload) != 1:
+        return payload
+    key = next(iter(payload))
+    return payload[key] if key in keys else payload
+
+
+def parse_visual_batch_response(raw_response: str, expected_count: int) -> list[FrameModerationOutput]:
+    payload = _load_model_json(raw_response)
+    payload = _unwrap_envelope(payload, ("results", "frames", "result"))
+    if isinstance(payload, dict) and expected_count == 1 and "frame_index" in payload:
+        payload = [payload]
 
     if not isinstance(payload, list):
         raise AppError(codes.MODEL_RESPONSE_INVALID_SCHEMA, "model response must be a JSON array", status_code=502)
@@ -90,10 +144,8 @@ def parse_visual_batch_response(raw_response: str, expected_count: int) -> list[
 
 
 def parse_text_moderation_response(raw_response: str) -> TextModerationOutput:
-    try:
-        payload = json.loads(raw_response)
-    except json.JSONDecodeError as exc:
-        raise AppError(codes.MODEL_RESPONSE_INVALID_JSON, "model response was not valid JSON", status_code=502) from exc
+    payload = _load_model_json(raw_response)
+    payload = _unwrap_envelope(payload, ("result", "moderation"))
 
     if not isinstance(payload, dict):
         raise AppError(

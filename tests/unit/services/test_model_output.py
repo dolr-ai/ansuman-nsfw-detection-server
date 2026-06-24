@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from app.errors import codes
 from app.errors.base import AppError
 from app.schemas.model_output import parse_text_moderation_response, parse_visual_batch_response
 
@@ -37,9 +38,61 @@ def test_parse_valid_five_frame_response() -> None:
     assert [item.frame_index for item in parsed] == [0, 1, 2, 3, 4]
 
 
+def test_parse_visual_batch_response_accepts_json_code_fence() -> None:
+    raw = f"\n\n```json\n{json.dumps([frame(0)], indent=2)}\n```\n"
+
+    parsed = parse_visual_batch_response(raw, expected_count=1)
+
+    assert parsed[0].frame_index == 0
+    assert parsed[0].top_category == "safe"
+
+
+def test_parse_visual_batch_response_accepts_surrounding_model_commentary() -> None:
+    raw = f"<think>Classify the image.</think>\n{json.dumps([frame(0)])}\nDone."
+
+    parsed = parse_visual_batch_response(raw, expected_count=1)
+
+    assert parsed[0].top_category == "safe"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        lambda: frame(0),
+        lambda: {"result": frame(0)},
+        lambda: {"results": [frame(0)]},
+        lambda: {"frames": [frame(0)]},
+    ],
+)
+def test_parse_visual_batch_response_normalizes_common_single_frame_shapes(payload) -> None:  # type: ignore[no-untyped-def]
+    parsed = parse_visual_batch_response(json.dumps(payload()), expected_count=1)
+
+    assert parsed[0].frame_index == 0
+
+
 def test_rejects_non_json() -> None:
-    with pytest.raises(AppError):
+    with pytest.raises(AppError) as exc:
         parse_visual_batch_response("not-json", expected_count=1)
+
+    assert exc.value.code == codes.MODEL_RESPONSE_INVALID_JSON
+
+
+def test_rejects_multiple_json_documents() -> None:
+    raw = f"{json.dumps([frame(0)])}\n{json.dumps([frame(0)])}"
+
+    with pytest.raises(AppError) as exc:
+        parse_visual_batch_response(raw, expected_count=1)
+
+    assert exc.value.code == codes.MODEL_RESPONSE_INVALID_JSON
+
+
+def test_rejects_malformed_json_instead_of_salvaging_nested_object() -> None:
+    raw = f"[{json.dumps(frame(0))},]"
+
+    with pytest.raises(AppError) as exc:
+        parse_visual_batch_response(raw, expected_count=1)
+
+    assert exc.value.code == codes.MODEL_RESPONSE_INVALID_JSON
 
 
 def test_rejects_wrong_count() -> None:
@@ -66,6 +119,21 @@ def test_parse_text_moderation_response_accepts_prompt_shape_and_computes_policy
     assert parsed.top_category == "porn"
     assert parsed.overall_severity == 4
     assert parsed.is_nsfw is True
+
+
+def test_parse_text_moderation_response_accepts_plain_code_fence() -> None:
+    raw = f"```\n{json.dumps(text_payload())}\n```"
+
+    parsed = parse_text_moderation_response(raw)
+
+    assert parsed.top_category == "safe"
+
+
+@pytest.mark.parametrize("envelope", ["result", "moderation"])
+def test_parse_text_moderation_response_unwraps_known_envelope(envelope: str) -> None:
+    parsed = parse_text_moderation_response(json.dumps({envelope: text_payload()}))
+
+    assert parsed.top_category == "safe"
 
 
 def test_parse_text_moderation_response_ignores_legacy_policy_fields() -> None:
